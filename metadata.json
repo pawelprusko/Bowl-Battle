@@ -1,0 +1,8 @@
+{
+  "name": "Street Blitz Duel",
+  "description": "1v1 mobile arcade football brawler",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

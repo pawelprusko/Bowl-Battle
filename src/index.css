@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+html, body {
+    margin: 0;
+    overflow: hidden;
+    background-color: #111;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    overscroll-behavior: none;
+}
+
+#root {
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.game-container {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: #000;
+    overflow: hidden;
+}
+
+@media (orientation: portrait) {
+    .rotate-warning {
+        position: fixed;
+        inset: 0;
+        background: black;
+        color: white;
+        z-index: 9999;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        flex-direction: column;
+        gap: 1rem;
+        font-family: sans-serif;
+        text-align: center;
+    }
+}
+@media (orientation: landscape) {
+    .rotate-warning {
+        display: none;
+    }
+}

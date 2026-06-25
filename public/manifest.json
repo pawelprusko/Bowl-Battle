@@ -1,0 +1,17 @@
+{
+  "name": "Street Blitz Duel",
+  "short_name": "Street Blitz",
+  "start_url": ".",
+  "display": "fullscreen",
+  "background_color": "#171717",
+  "theme_color": "#171717",
+  "orientation": "landscape",
+  "icons": [
+    {
+      "src": "icon-512.jpg",
+      "sizes": "192x192 512x512",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    }
+  ]
+}
