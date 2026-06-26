@@ -37,10 +37,8 @@ html, body {
 @media (orientation: portrait) {
     .game-container {
         /* Force landscape by swapping width/height and rotating */
-        width: 100vh !important;
-        width: 100lvh !important;
-        height: 100vw !important;
-        height: 100lvw !important;
+        width: 100dvh !important;
+        height: 100dvw !important;
         position: absolute !important;
         top: 50% !important;
         left: 50% !important;

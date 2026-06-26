@@ -163,12 +163,15 @@ export default function App() {
               setTimeout(() => {
                   root.style.height = '100%';
                   root.style.minHeight = '100dvh';
+                  // Force window resize event to recalculate logic
+                  window.dispatchEvent(new Event('resize'));
               }, 200);
           }
       };
 
       nudgeLayout();
       setTimeout(nudgeLayout, 500);
+      setTimeout(nudgeLayout, 1500);
       
       const handleResize = () => {
           const container = document.querySelector('.game-container') as HTMLElement;
@@ -195,13 +198,18 @@ export default function App() {
           setTimeout(handleResize, 100);
           setTimeout(handleResize, 300);
       };
+
+      const orientationChangeWithDelay = () => {
+          nudgeLayout();
+          resizeWithDelay();
+      };
       
       handleResize();
       window.addEventListener('resize', resizeWithDelay);
-      window.addEventListener('orientationchange', resizeWithDelay);
+      window.addEventListener('orientationchange', orientationChangeWithDelay);
       return () => {
           window.removeEventListener('resize', resizeWithDelay);
-          window.removeEventListener('orientationchange', resizeWithDelay);
+          window.removeEventListener('orientationchange', orientationChangeWithDelay);
       };
   }, []);
 
