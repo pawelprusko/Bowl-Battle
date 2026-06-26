@@ -162,7 +162,7 @@ export default function App() {
               
               setTimeout(() => {
                   root.style.height = '100%';
-                  root.style.minHeight = '100vh';
+                  root.style.minHeight = '100dvh';
               }, 200);
           }
       };
@@ -171,9 +171,17 @@ export default function App() {
       setTimeout(nudgeLayout, 500);
       
       const handleResize = () => {
-          const isPortrait = window.innerHeight > window.innerWidth;
-          const logicalWidth = isPortrait ? window.innerHeight : window.innerWidth;
-          const logicalHeight = isPortrait ? window.innerWidth : window.innerHeight;
+          const container = document.querySelector('.game-container') as HTMLElement;
+          let logicalWidth, logicalHeight;
+          
+          if (container) {
+              logicalWidth = container.offsetWidth;
+              logicalHeight = container.offsetHeight;
+          } else {
+              const isPortrait = window.innerHeight > window.innerWidth;
+              logicalWidth = isPortrait ? window.innerHeight : window.innerWidth;
+              logicalHeight = isPortrait ? window.innerWidth : window.innerHeight;
+          }
 
           const windowRatio = logicalWidth / logicalHeight;
           const gameWidth = 450 * windowRatio;
