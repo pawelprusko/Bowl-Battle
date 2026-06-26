@@ -156,13 +156,11 @@ export default function App() {
           const root = document.getElementById('root');
           if (root) {
               root.style.height = '100.1vh';
-              root.style.minHeight = '100.1vh';
               
               window.scrollTo(0, 1);
               
               setTimeout(() => {
-                  root.style.height = '100%';
-                  root.style.minHeight = '100dvh';
+                  root.style.height = '100vh';
                   // Force window resize event to recalculate logic
                   window.dispatchEvent(new Event('resize'));
               }, 200);
@@ -179,15 +177,15 @@ export default function App() {
           const isPortrait = window.innerHeight > window.innerWidth;
           
           if (container) {
-              // Set explicit dimensions to fix iOS Safari 100dvh safe-area bugs
               if (isPortrait) {
-                  container.style.width = `${window.innerHeight}px`;
-                  container.style.height = `${window.innerWidth}px`;
+                  // Let CSS handle the 100vh / 100vw rotation
+                  container.style.width = '';
+                  container.style.height = '';
                   logicalWidth = window.innerHeight;
                   logicalHeight = window.innerWidth;
               } else {
-                  container.style.width = `${window.innerWidth}px`;
-                  container.style.height = `${window.innerHeight}px`;
+                  container.style.width = '100%';
+                  container.style.height = '100%';
                   logicalWidth = window.innerWidth;
                   logicalHeight = window.innerHeight;
               }
