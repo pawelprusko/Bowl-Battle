@@ -24,7 +24,8 @@ export const ASSET_PATHS = {
         arena: '/assets/images/background.jpg'
     },
     ui: {
-        splashscreen: '/assets/images/splashscreen.jpg'
+        splashscreen: '/assets/images/splashscreen.jpg',
+        loader: '/assets/images/loader.png'
     }
 };
 

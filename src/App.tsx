@@ -5,7 +5,7 @@ import { Renderer } from './game/Renderer';
 import { loadAssets } from './game/assets';
 import { updateGameDimensions, ASSET_PATHS } from './game/constants';
 
-function SplashFallback({ onPlay }: { onPlay: () => void }) {
+function SplashFallback({ onPlay, gameState, loadingProgress }: { onPlay: () => void, gameState: GameState, loadingProgress: number }) {
     const [imageFailed, setImageFailed] = useState(false);
     
     return (
@@ -26,13 +26,46 @@ function SplashFallback({ onPlay }: { onPlay: () => void }) {
                 </>
             )}
             
-            <button 
-                onClick={onPlay}
-                className="px-12 py-4 bg-yellow-400 text-black text-3xl font-bold rounded shadow-[0_0_20px_rgba(255,255,0,0.6)] animate-pulse z-10"
-                style={{ position: 'absolute', bottom: '20%' }}
-            >
-                PLAY
-            </button>
+            {gameState === GameState.SPLASH && (
+                <button 
+                    onClick={onPlay}
+                    className="px-12 py-3 bg-violet-500/50 backdrop-blur-xs text-white text-3xl font-semibold rounded-2xl border-2 border-white/80 shadow-[0_0_15px_rgba(255,255,255,0.4)] animate-bounce z-10 hover:bg-violet-400/80 hover:scale-105 active:scale-95 transition-all duration-300"
+                    style={{ position: 'absolute', bottom: '14%', animationDuration: '2.5s' }}
+                >
+                    PLAY
+                </button>
+            )}
+
+            {gameState === GameState.LOADING && (
+                <div 
+                    className="absolute z-10 w-1/2 max-w-lg h-8 bg-violet-500/50 backdrop-blur-xs rounded-xl border border-white/80 shadow-[0_0_15px_rgba(255,255,255,0.4)] flex items-center"
+                    style={{ bottom: '15%' }}
+                >
+                    <div 
+                        className="absolute left-0 top-0 h-full bg-purple-950 rounded-xl transition-all duration-100 ease-linear"
+                        style={{ width: `${loadingProgress}%` }}
+                    />
+                    
+                    <span className="relative z-20 ml-4 text-white text-sm md:text-base font-semibold tracking-wide">
+                        Finding an Opponent...
+                    </span>
+
+                    <div 
+                        className="absolute z-30 transition-all duration-100 ease-linear flex items-end justify-center pointer-events-none"
+                        style={{ 
+                            left: `${loadingProgress}%`,
+                            transform: 'translateX(-50%)',
+                            bottom: '-4px'
+                        }}
+                    >
+                        <img 
+                            src={ASSET_PATHS.ui.loader} 
+                            alt="Loader" 
+                            className="h-14 w-auto object-contain drop-shadow-md"
+                        />
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
@@ -304,21 +337,8 @@ export default function App() {
          <p>Gra wymaga układu horyzontalnego (Landscape 16:9)</p>
       </div>
 
-      {gameState === GameState.SPLASH && (
-        <SplashFallback onPlay={handlePlayClick} />
-      )}
-
-      {gameState === GameState.LOADING && (
-        <div className="absolute inset-0 bg-neutral-900 flex flex-col items-center justify-center text-white z-50">
-            <h2 className="text-2xl font-mono mb-4 text-cyan-400">Ładowanie dzielnicy...</h2>
-            <div className="w-64 h-8 bg-gray-800 rounded p-1 border border-cyan-500/50">
-                <div 
-                    className="h-full bg-cyan-500 rounded transition-all duration-100 linear"
-                    style={{ width: `${loadingProgress}%` }}
-                />
-            </div>
-            <p className="mt-4 font-mono text-xl">{Math.ceil(5 - (loadingProgress/100)*5)}</p>
-        </div>
+      {(gameState === GameState.SPLASH || gameState === GameState.LOADING) && (
+        <SplashFallback onPlay={handlePlayClick} gameState={gameState} loadingProgress={loadingProgress} />
       )}
 
       {/* Main Game rendering inside PLAYING or GAME_OVER */}
