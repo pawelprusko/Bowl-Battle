@@ -10,12 +10,21 @@ export function updateGameDimensions(width: number, height: number) {
 
 export const ASSET_PATHS = {
     sprites: {
-        player: '/assets/sprites/player.png',
-        bot: '/assets/sprites/bot.png',
+        player_head: '/assets/sprites/p1_head.png',
+        player_body: '/assets/sprites/p1_body.png',
+        player_arm: '/assets/sprites/p1_arm.png',
+        player_leg: '/assets/sprites/p1_leg.png',
+        bot_head: '/assets/sprites/bot_head.png',
+        bot_body: '/assets/sprites/bot_body.png',
+        bot_arm: '/assets/sprites/bot_arm.png',
+        bot_leg: '/assets/sprites/bot_leg.png',
         ball: '/assets/sprites/ball.png'
     },
     backgrounds: {
-        arena: '/assets/backgrounds/arena.png'
+        arena: '/assets/images/background.png'
+    },
+    ui: {
+        splashscreen: '/assets/images/splashscreen.png'
     }
 };
 

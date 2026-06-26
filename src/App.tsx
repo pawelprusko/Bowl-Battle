@@ -3,7 +3,39 @@ import { GameState } from './game/Types';
 import { GameWorld } from './game/GameWorld';
 import { Renderer } from './game/Renderer';
 import { loadAssets } from './game/assets';
-import { updateGameDimensions } from './game/constants';
+import { updateGameDimensions, ASSET_PATHS } from './game/constants';
+
+function SplashFallback({ onPlay }: { onPlay: () => void }) {
+    const [imageFailed, setImageFailed] = useState(false);
+    
+    return (
+        <div className="absolute inset-0 bg-neutral-900 flex flex-col items-center justify-center text-white z-50 overflow-hidden">
+            {!imageFailed ? (
+                <img 
+                    src={ASSET_PATHS.ui.splashscreen} 
+                    onError={() => setImageFailed(true)}
+                    className="absolute inset-0 w-full h-full object-cover"
+                    alt="Splash Background"
+                />
+            ) : (
+                <>
+                    <h1 className="text-6xl font-black text-white drop-shadow-[0_0_15px_rgba(0,255,255,0.8)] tracking-tighter italic mb-2 z-10">
+                        BOWL BATTLE
+                    </h1>
+                    <h2 className="text-3xl font-bold text-red-500 mb-12 drop-shadow-[0_0_10px_rgba(255,0,0,0.8)] z-10"> </h2>
+                </>
+            )}
+            
+            <button 
+                onClick={onPlay}
+                className="px-12 py-4 bg-yellow-400 text-black text-3xl font-bold rounded shadow-[0_0_20px_rgba(255,255,0,0.6)] animate-pulse z-10"
+                style={{ position: 'absolute', bottom: '20%' }}
+            >
+                PLAY
+            </button>
+        </div>
+    );
+}
 
 export default function App() {
   const [gameState, setGameState] = useState<GameState>(GameState.SPLASH);
@@ -273,18 +305,7 @@ export default function App() {
       </div>
 
       {gameState === GameState.SPLASH && (
-        <div className="absolute inset-0 bg-neutral-900 flex flex-col items-center justify-center text-white z-50">
-            <h1 className="text-6xl font-black text-white drop-shadow-[0_0_15px_rgba(0,255,255,0.8)] tracking-tighter italic mb-2">
-                BOWL BATTLE
-            </h1>
-            <h2 className="text-3xl font-bold text-red-500 mb-12 drop-shadow-[0_0_10px_rgba(255,0,0,0.8)]"> </h2>
-            <button 
-                onClick={handlePlayClick}
-                className="px-12 py-4 bg-yellow-400 text-black text-3xl font-bold rounded shadow-[0_0_20px_rgba(255,255,0,0.6)] animate-pulse"
-            >
-                PLAY
-            </button>
-        </div>
+        <SplashFallback onPlay={handlePlayClick} />
       )}
 
       {gameState === GameState.LOADING && (

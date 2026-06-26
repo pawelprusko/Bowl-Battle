@@ -53,7 +53,8 @@ export class Renderer {
             isTackling: boolean, isKicking: boolean,
             dirX: number, velX: number,
             onGround: boolean, velY: number,
-            knockbackTimer: number = 0
+            knockbackTimer: number = 0,
+            spritePrefix: string = ''
         ) => {
             ctx.save();
             
@@ -103,93 +104,130 @@ export class Renderer {
             const handS = 12;
             const drawH = 80;
             
+            const imgHead = spritePrefix ? getImage('sprites.' + spritePrefix + '_head') : null;
+            const imgBody = spritePrefix ? getImage('sprites.' + spritePrefix + '_body') : null;
+            const imgArm = spritePrefix ? getImage('sprites.' + spritePrefix + '_arm') : null;
+            const imgLeg = spritePrefix ? getImage('sprites.' + spritePrefix + '_leg') : null;
+
+            const drawPart = (img: HTMLImageElement | null, px: number, py: number, defaultSize: number, rotation: number = 0) => {
+                if (!img) return false;
+                ctx.save();
+                ctx.translate(px, py);
+                if (faceDir < 0) ctx.scale(-1, 1);
+                if (rotation !== 0) {
+                    ctx.rotate(rotation * (faceDir < 0 ? -1 : 1));
+                }
+                const aspect = img.width / img.height;
+                ctx.drawImage(img, -defaultSize*aspect/2, -defaultSize/2, defaultSize*aspect, defaultSize);
+                ctx.restore();
+                return true;
+            };
+            
             // Back Arm
             const bArmY = cy - drawH + headS + 15 + bounceY;
             const bArmX = cx + Math.sin(runCycle + Math.PI) * 20 * (runSpeed>10?1:0);
-            ctx.fillStyle = skinColor;
-            ctx.beginPath(); ctx.arc(bArmX, bArmY, handS, 0, Math.PI*2); ctx.fill();
+            if (!drawPart(imgArm, bArmX, bArmY, handS * 3)) {
+                ctx.fillStyle = skinColor;
+                ctx.beginPath(); ctx.arc(bArmX, bArmY, handS, 0, Math.PI*2); ctx.fill();
+            }
             
             // Back Leg (Shoe)
             const bLegY = cy - shoeS/2 - (runSpeed>10 ? Math.max(0, Math.sin(runCycle + Math.PI) * 15) : 0);
             const bLegX = cx + Math.cos(runCycle + Math.PI) * 20 * (runSpeed>10?1:0);
-            ctx.fillStyle = '#222'; 
-            ctx.beginPath(); ctx.ellipse(bLegX, bLegY, shoeS, shoeS/1.5, 0, 0, Math.PI*2); ctx.fill();
-            ctx.fillStyle = '#0ff'; // Neon laces
-            ctx.fillRect(bLegX + (faceDir * shoeS*0.3), bLegY - 4, 4, 8);
+            if (!drawPart(imgLeg, bLegX, bLegY, shoeS * 1.5)) {
+                ctx.fillStyle = '#222'; 
+                ctx.beginPath(); ctx.ellipse(bLegX, bLegY, shoeS, shoeS/1.5, 0, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = '#0ff'; // Neon laces
+                ctx.fillRect(bLegX + (faceDir * shoeS*0.3), bLegY - 4, 4, 8);
+            }
             
             // Torso
-            ctx.fillStyle = primaryColor;
-            ctx.beginPath();
-            ctx.roundRect(cx - torsoW/2, cy - drawH + headS + bounceY, torsoW, torsoH, 10);
-            ctx.fill();
-            ctx.fillStyle = '#fff';
-            ctx.fillRect(cx - torsoW/2 + 5, cy - drawH + headS + 15 + bounceY, torsoW - 10, 8); // Stripe
+            const torsoY = cy - drawH + headS + bounceY + torsoH/2;
+            if (!drawPart(imgBody, cx, torsoY, torsoH * 1.5)) {
+                ctx.fillStyle = primaryColor;
+                ctx.beginPath();
+                ctx.roundRect(cx - torsoW/2, cy - drawH + headS + bounceY, torsoW, torsoH, 10);
+                ctx.fill();
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(cx - torsoW/2 + 5, cy - drawH + headS + 15 + bounceY, torsoW - 10, 8); // Stripe
+            }
             
             // Front Leg (Shoe)
             let fLegY = cy - shoeS/2 - (runSpeed>10 ? Math.max(0, Math.sin(runCycle) * 15) : 0);
             let fLegX = cx + Math.cos(runCycle) * 20 * (runSpeed>10?1:0);
+            let fLegRot = 0;
             if (isKicking) {
                 fLegY = cy - 40;
                 fLegX = cx + faceDir * 40;
+                fLegRot = -Math.PI/4;
             } else if (isTackling) {
                 fLegY = cy - 10;
                 fLegX = cx + faceDir * 30;
+                fLegRot = -Math.PI/8;
             }
-            ctx.fillStyle = primaryColor; 
-            ctx.beginPath(); ctx.ellipse(fLegX, fLegY, shoeS, shoeS/1.5, 0, 0, Math.PI*2); ctx.fill();
-            ctx.fillStyle = '#fff'; 
-            ctx.fillRect(fLegX - shoeS + 5, fLegY + shoeS/2 - 2, shoeS*2 - 10, 4);
+            if (!drawPart(imgLeg, fLegX, fLegY, shoeS * 1.5, fLegRot)) {
+                ctx.fillStyle = primaryColor; 
+                ctx.beginPath(); ctx.ellipse(fLegX, fLegY, shoeS, shoeS/1.5, 0, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = '#fff'; 
+                ctx.fillRect(fLegX - shoeS + 5, fLegY + shoeS/2 - 2, shoeS*2 - 10, 4);
+            }
             
             // Head / Helmet
             const headY = cy - drawH + headS/2 + bounceY;
             const headX = cx + (faceDir * 5); 
-            ctx.fillStyle = primaryColor; 
-            ctx.beginPath(); ctx.arc(headX, headY, headS, 0, Math.PI*2); ctx.fill();
-            
-            // Visor / Face cut
-            ctx.fillStyle = skinColor;
-            ctx.beginPath(); ctx.arc(headX + faceDir*10, headY+8, headS - 15, 0, Math.PI*2); ctx.fill();
-            
-            // Helmet grill
-            ctx.strokeStyle = '#e0e0e0';
-            ctx.lineWidth = 4;
-            ctx.beginPath();
-            ctx.moveTo(headX + faceDir*20, headY);
-            ctx.lineTo(headX + faceDir*45, headY + 20);
-            ctx.moveTo(headX + faceDir*15, headY + 10);
-            ctx.lineTo(headX + faceDir*35, headY + 30);
-            ctx.stroke();
-            
-            // Eye
-            ctx.fillStyle = isStunned ? '#ff0000' : '#fff';
-            if(isStunned) {
-                ctx.strokeStyle = '#800'; ctx.lineWidth = 3;
-                ctx.beginPath(); ctx.moveTo(headX + faceDir*20 - 6, headY-6); ctx.lineTo(headX + faceDir*20 + 6, headY+6); ctx.stroke();
-                ctx.beginPath(); ctx.moveTo(headX + faceDir*20 + 6, headY-6); ctx.lineTo(headX + faceDir*20 - 6, headY+6); ctx.stroke();
-            } else {
-                ctx.beginPath(); ctx.arc(headX + faceDir*20, headY-5, 8, 0, Math.PI*2); ctx.fill();
-                ctx.fillStyle = '#000';
-                ctx.beginPath(); ctx.arc(headX + faceDir*(20 + (velX*faceDir>10?3:0)), headY-5, 3, 0, Math.PI*2); ctx.fill();
-                // Eyebrow
-                ctx.strokeStyle = '#222';
-                ctx.lineWidth = 3;
+            if (!drawPart(imgHead, headX, headY, headS * 2)) {
+                ctx.fillStyle = primaryColor; 
+                ctx.beginPath(); ctx.arc(headX, headY, headS, 0, Math.PI*2); ctx.fill();
+                
+                // Visor / Face cut
+                ctx.fillStyle = skinColor;
+                ctx.beginPath(); ctx.arc(headX + faceDir*10, headY+8, headS - 15, 0, Math.PI*2); ctx.fill();
+                
+                // Helmet grill
+                ctx.strokeStyle = '#e0e0e0';
+                ctx.lineWidth = 4;
                 ctx.beginPath();
-                ctx.moveTo(headX + faceDir*10, headY - 15);
-                ctx.lineTo(headX + faceDir*28, headY - 8 + (isTackling?5:0)); // Angrier if tackling
+                ctx.moveTo(headX + faceDir*20, headY);
+                ctx.lineTo(headX + faceDir*45, headY + 20);
+                ctx.moveTo(headX + faceDir*15, headY + 10);
+                ctx.lineTo(headX + faceDir*35, headY + 30);
                 ctx.stroke();
+                
+                // Eye
+                ctx.fillStyle = isStunned ? '#ff0000' : '#fff';
+                if(isStunned) {
+                    ctx.strokeStyle = '#800'; ctx.lineWidth = 3;
+                    ctx.beginPath(); ctx.moveTo(headX + faceDir*20 - 6, headY-6); ctx.lineTo(headX + faceDir*20 + 6, headY+6); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(headX + faceDir*20 + 6, headY-6); ctx.lineTo(headX + faceDir*20 - 6, headY+6); ctx.stroke();
+                } else {
+                    ctx.beginPath(); ctx.arc(headX + faceDir*20, headY-5, 8, 0, Math.PI*2); ctx.fill();
+                    ctx.fillStyle = '#000';
+                    ctx.beginPath(); ctx.arc(headX + faceDir*(20 + (velX*faceDir>10?3:0)), headY-5, 3, 0, Math.PI*2); ctx.fill();
+                    // Eyebrow
+                    ctx.strokeStyle = '#222';
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.moveTo(headX + faceDir*10, headY - 15);
+                    ctx.lineTo(headX + faceDir*28, headY - 8 + (isTackling?5:0)); // Angrier if tackling
+                    ctx.stroke();
+                }
             }
             
             // Front Arm
             let fArmY = cy - drawH + headS + 15 + bounceY;
             let fArmX = cx + Math.sin(runCycle) * 20 * (runSpeed>10?1:0);
+            let fArmRot = 0;
             if (isTackling) {
                 fArmX = cx + faceDir * 35;
                 fArmY = cy - drawH + headS + 10;
+                fArmRot = -Math.PI/4;
             }
-            ctx.fillStyle = skinColor;
-            ctx.beginPath(); ctx.arc(fArmX, fArmY, handS, 0, Math.PI*2); ctx.fill();
-            ctx.fillStyle = '#fff'; // Sweatband
-            ctx.fillRect(fArmX - handS, fArmY - 2, handS*2, 4);
+            if (!drawPart(imgArm, fArmX, fArmY, handS * 3, fArmRot)) {
+                ctx.fillStyle = skinColor;
+                ctx.beginPath(); ctx.arc(fArmX, fArmY, handS, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = '#fff'; // Sweatband
+                ctx.fillRect(fArmX - handS, fArmY - 2, handS*2, 4);
+            }
         
             ctx.restore();
         };
@@ -226,7 +264,7 @@ export class Renderer {
         } else {
             drawHeadballPlayer(world.bot.pos.x, world.bot.pos.y, world.bot.size.x, world.bot.size.y, 
                 '#e63946', '#fbc4ab', botEffectiveStun, world.bot.debuffTimer > 0, 
-                world.bot.isTackling || world.bot.isDiving || world.subState === GameSubState.SCRUM_MATRIX, world.subState === GameSubState.KICKING && world.bot.role === PlayerRole.ATTACKER, botDir, world.bot.vel.x, world.bot.onGround, world.bot.vel.y, world.bot.knockbackTimer);
+                world.bot.isTackling || world.bot.isDiving || world.subState === GameSubState.SCRUM_MATRIX, world.subState === GameSubState.KICKING && world.bot.role === PlayerRole.ATTACKER, botDir, world.bot.vel.x, world.bot.onGround, world.bot.vel.y, world.bot.knockbackTimer, 'bot');
         }
         ctx.shadowBlur = 0;
         
@@ -263,7 +301,7 @@ export class Renderer {
             drawHeadballPlayer(world.player.pos.x, world.player.pos.y, world.player.size.x, world.player.size.y, 
                 '#4361ee', '#ffcab0', pEffectiveStun, world.player.debuffTimer > 0, 
                 world.player.isTackling || world.player.isDiving || world.subState === GameSubState.SCRUM_MATRIX, world.subState === GameSubState.KICKING && world.player.role === PlayerRole.ATTACKER, 
-                pDir, world.player.vel.x, world.player.onGround, world.player.vel.y, world.player.knockbackTimer);
+                pDir, world.player.vel.x, world.player.onGround, world.player.vel.y, world.player.knockbackTimer, 'player');
         }
         ctx.shadowBlur = 0;
 
@@ -529,6 +567,21 @@ export class Renderer {
 
     drawStadiumBackground() {
         const { ctx } = this;
+        
+        const arenaImg = getImage('backgrounds.arena');
+        if (arenaImg) {
+            ctx.save();
+            // Object-fit: cover logic
+            const scale = Math.max(GAME_WIDTH / arenaImg.width, GAME_HEIGHT / arenaImg.height);
+            const drawW = arenaImg.width * scale;
+            const drawH = arenaImg.height * scale;
+            const drawX = (GAME_WIDTH - drawW) / 2;
+            const drawY = (GAME_HEIGHT - drawH) / 2;
+            ctx.drawImage(arenaImg, drawX, drawY, drawW, drawH);
+            ctx.restore();
+            return;
+        }
+
         const horizon = GAME_HEIGHT * 0.40;
         
         ctx.save();
