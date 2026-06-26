@@ -176,12 +176,22 @@ export default function App() {
       const handleResize = () => {
           const container = document.querySelector('.game-container') as HTMLElement;
           let logicalWidth, logicalHeight;
+          const isPortrait = window.innerHeight > window.innerWidth;
           
           if (container) {
-              logicalWidth = container.offsetWidth;
-              logicalHeight = container.offsetHeight;
+              // Set explicit dimensions to fix iOS Safari 100dvh safe-area bugs
+              if (isPortrait) {
+                  container.style.width = `${window.innerHeight}px`;
+                  container.style.height = `${window.innerWidth}px`;
+                  logicalWidth = window.innerHeight;
+                  logicalHeight = window.innerWidth;
+              } else {
+                  container.style.width = `${window.innerWidth}px`;
+                  container.style.height = `${window.innerHeight}px`;
+                  logicalWidth = window.innerWidth;
+                  logicalHeight = window.innerHeight;
+              }
           } else {
-              const isPortrait = window.innerHeight > window.innerWidth;
               logicalWidth = isPortrait ? window.innerHeight : window.innerWidth;
               logicalHeight = isPortrait ? window.innerWidth : window.innerHeight;
           }
@@ -200,8 +210,10 @@ export default function App() {
       };
 
       const orientationChangeWithDelay = () => {
-          nudgeLayout();
-          resizeWithDelay();
+          setTimeout(() => {
+              nudgeLayout();
+              resizeWithDelay();
+          }, 200);
       };
       
       handleResize();

@@ -36,9 +36,7 @@ html, body, #root {
 
 @media (orientation: portrait) {
     .game-container {
-        /* Force landscape by swapping width/height and rotating */
-        width: 100dvh !important;
-        height: 100dvw !important;
+        /* Force landscape by rotating. Width and height are set via JS to avoid iOS safe area bugs */
         position: absolute !important;
         top: 50% !important;
         left: 50% !important;
