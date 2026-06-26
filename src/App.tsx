@@ -162,7 +162,7 @@ export default function App() {
               
               setTimeout(() => {
                   root.style.height = '100%';
-                  root.style.minHeight = '100dvh';
+                  root.style.minHeight = '100vh';
               }, 200);
           }
       };

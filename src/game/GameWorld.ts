@@ -24,7 +24,7 @@ export class PhysicalBody {
         this.pos.add(this.vel.clone().scale(dt));
         
         // Floor constraints
-        if (this.pos.y > GROUND_Y - this.size.y) {
+        if (this.pos.y >= GROUND_Y - this.size.y) {
             this.pos.y = GROUND_Y - this.size.y;
             this.vel.y = 0;
             if (this.vel.y >= 0) { // Fix bouncing logic if needed
@@ -193,7 +193,7 @@ export class Ball extends PhysicalBody {
 
         this.pos.add(this.vel.clone().scale(dt));
         
-        if (this.pos.y > GROUND_Y - this.size.y) {
+        if (this.pos.y >= GROUND_Y - this.size.y) {
             this.pos.y = GROUND_Y - this.size.y;
             if (this.vel.y >= 0) {
                 if (this.vel.y > 20) {

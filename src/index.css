@@ -11,13 +11,11 @@ html, body {
     overscroll-behavior-x: none;
     width: 100vw;
     height: 100vh;
-    height: 100dvh;
 }
 
 #root {
     width: 100vw;
     height: 100vh;
-    height: 100dvh;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -38,9 +36,7 @@ html, body {
     .game-container {
         /* Force landscape by swapping width/height and rotating */
         width: 100vh !important;
-        width: 100dvh !important;
         height: 100vw !important;
-        height: 100dvw !important;
         position: absolute !important;
         top: 50% !important;
         left: 50% !important;
