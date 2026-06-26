@@ -38,15 +38,15 @@ function SplashFallback({ onPlay, gameState, loadingProgress }: { onPlay: () => 
 
             {gameState === GameState.LOADING && (
                 <div 
-                    className="absolute z-10 w-1/2 max-w-lg h-8 bg-violet-500/50 backdrop-blur-xs rounded-xl border border-white/80 shadow-[0_0_15px_rgba(255,255,255,0.4)] flex items-center"
+                    className="absolute z-10 w-1/3 max-w-sm h-5 bg-violet-500/50 backdrop-blur-xs rounded-lg border border-white/80 shadow-[0_0_15px_rgba(255,255,255,0.4)] flex items-center"
                     style={{ bottom: '15%' }}
                 >
                     <div 
-                        className="absolute left-0 top-0 h-full bg-purple-950 rounded-xl transition-all duration-100 ease-linear"
+                        className="absolute left-0 top-0 h-full bg-purple-950 rounded-lg transition-all duration-100 ease-linear"
                         style={{ width: `${loadingProgress}%` }}
                     />
                     
-                    <span className="relative z-20 ml-4 text-white text-sm md:text-base font-semibold tracking-wide">
+                    <span className="relative z-20 ml-4 text-white text-[10px] md:text-xs font-semibold tracking-wide">
                         Finding an Opponent...
                     </span>
 
@@ -61,7 +61,7 @@ function SplashFallback({ onPlay, gameState, loadingProgress }: { onPlay: () => 
                         <img 
                             src={ASSET_PATHS.ui.loader} 
                             alt="Loader" 
-                            className="h-14 w-auto object-contain drop-shadow-md"
+                            className="h-9 w-auto object-contain drop-shadow-md"
                         />
                     </div>
                 </div>
@@ -116,7 +116,7 @@ export default function App() {
     loadAssets().then(() => {
         let progress = 0;
         const interval = setInterval(() => {
-            progress += 100 / (5.0 / 0.1); // 5 seconds total
+            progress += 100 / (4.0 / 0.1); // 4 seconds total
             if (progress >= 100) {
                 clearInterval(interval);
                 startGame();
@@ -171,11 +171,15 @@ export default function App() {
       setTimeout(nudgeLayout, 500);
       
       const handleResize = () => {
-          const windowRatio = window.innerWidth / window.innerHeight;
+          const isPortrait = window.innerHeight > window.innerWidth;
+          const logicalWidth = isPortrait ? window.innerHeight : window.innerWidth;
+          const logicalHeight = isPortrait ? window.innerWidth : window.innerHeight;
+
+          const windowRatio = logicalWidth / logicalHeight;
           const gameWidth = 450 * windowRatio;
           updateGameDimensions(gameWidth, 450);
           setDimensions({ width: gameWidth, height: 450 });
-          setScale(window.innerHeight / 450);
+          setScale(logicalHeight / 450);
       };
       
       const resizeWithDelay = () => {
@@ -350,12 +354,6 @@ export default function App() {
 
   return (
     <div className="game-container select-none">
-      <div className="rotate-warning">
-         <span className="rotate-icon">📱</span>
-         <h1 className="text-2xl font-bold">Obróć telefon do poziomu</h1>
-         <p>Gra wymaga układu horyzontalnego</p>
-      </div>
-
       {(gameState === GameState.SPLASH || gameState === GameState.LOADING) && (
         <SplashFallback onPlay={handlePlayClick} gameState={gameState} loadingProgress={loadingProgress} />
       )}
