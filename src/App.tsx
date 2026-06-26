@@ -67,17 +67,46 @@ export default function App() {
   const [scale, setScale] = useState(1);
 
   useEffect(() => {
+      // [FIX] Layout hack for Mobile Safe Area / 100vh bugs
+      const nudgeLayout = () => {
+          const root = document.getElementById('root');
+          if (root) {
+              root.style.height = '100.1vh';
+              root.style.minHeight = '100.1vh';
+              
+              window.scrollTo(0, 1);
+              
+              setTimeout(() => {
+                  root.style.height = '100%';
+                  root.style.minHeight = '100dvh';
+              }, 200);
+          }
+      };
+
+      nudgeLayout();
+      setTimeout(nudgeLayout, 500);
+      
       const handleResize = () => {
           const windowRatio = window.innerWidth / window.innerHeight;
-          // Keep game height fixed at 450, scale width to match screen aspect ratio
           const gameWidth = 450 * windowRatio;
           updateGameDimensions(gameWidth, 450);
           setDimensions({ width: gameWidth, height: 450 });
           setScale(window.innerHeight / 450);
       };
+      
+      const resizeWithDelay = () => {
+          handleResize();
+          setTimeout(handleResize, 100);
+          setTimeout(handleResize, 300);
+      };
+      
       handleResize();
-      window.addEventListener('resize', handleResize);
-      return () => window.removeEventListener('resize', handleResize);
+      window.addEventListener('resize', resizeWithDelay);
+      window.addEventListener('orientationchange', resizeWithDelay);
+      return () => {
+          window.removeEventListener('resize', resizeWithDelay);
+          window.removeEventListener('orientationchange', resizeWithDelay);
+      };
   }, []);
 
   useEffect(() => {
@@ -246,9 +275,9 @@ export default function App() {
       {gameState === GameState.SPLASH && (
         <div className="absolute inset-0 bg-neutral-900 flex flex-col items-center justify-center text-white z-50">
             <h1 className="text-6xl font-black text-white drop-shadow-[0_0_15px_rgba(0,255,255,0.8)] tracking-tighter italic mb-2">
-                STREET BLITZ
+                BOWL BATTLE
             </h1>
-            <h2 className="text-3xl font-bold text-red-500 mb-12 drop-shadow-[0_0_10px_rgba(255,0,0,0.8)]">DUEL</h2>
+            <h2 className="text-3xl font-bold text-red-500 mb-12 drop-shadow-[0_0_10px_rgba(255,0,0,0.8)]"> </h2>
             <button 
                 onClick={handlePlayClick}
                 className="px-12 py-4 bg-yellow-400 text-black text-3xl font-bold rounded shadow-[0_0_20px_rgba(255,255,0,0.6)] animate-pulse"
@@ -292,7 +321,14 @@ export default function App() {
                 />
                 
                 {/* HUD Overlay */}
-                <div className="absolute top-0 left-0 w-full p-4 flex justify-between items-start pointer-events-none z-10">
+                <div 
+                    className="absolute top-0 left-0 w-full p-4 flex justify-between items-start pointer-events-none z-10"
+                    style={{
+                        paddingLeft: 'max(1rem, env(safe-area-inset-left))',
+                        paddingRight: 'max(1rem, env(safe-area-inset-right))',
+                        paddingTop: 'max(1rem, env(safe-area-inset-top))'
+                    }}
+                >
                     <div className="bg-black/50 text-white px-6 py-2 rounded text-2xl font-bold font-mono">
                         P1: <span className="text-cyan-400">{hudState.pScore}</span>
                     </div>
@@ -315,7 +351,14 @@ export default function App() {
                 
                 {/* Mobile Controls Overlay */}
                 {gameState === GameState.PLAYING && (
-                   <div className="absolute bottom-0 left-0 w-full h-full pointer-events-none p-4 flex justify-between items-end pb-8 z-10">
+                   <div 
+                       className="absolute bottom-0 left-0 w-full h-full pointer-events-none p-4 flex justify-between items-end pb-8 z-10"
+                       style={{
+                           paddingLeft: 'max(1rem, env(safe-area-inset-left))',
+                           paddingRight: 'max(1rem, env(safe-area-inset-right))',
+                           paddingBottom: 'max(2rem, env(safe-area-inset-bottom))'
+                       }}
+                   >
                        {/* D-PAD Left */}
                        <div className="flex gap-2 pointer-events-auto">
                            <button 

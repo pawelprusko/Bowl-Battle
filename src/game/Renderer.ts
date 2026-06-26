@@ -16,6 +16,11 @@ export class Renderer {
     
     render(world: GameWorld) {
         const { ctx } = this;
+        if (ctx.canvas.width !== GAME_WIDTH || ctx.canvas.height !== GAME_HEIGHT) {
+            ctx.canvas.width = GAME_WIDTH;
+            ctx.canvas.height = GAME_HEIGHT;
+            ctx.imageSmoothingEnabled = false; // ensure it stays pixelated if needed
+        }
         const now = Date.now();
         
         ctx.save();

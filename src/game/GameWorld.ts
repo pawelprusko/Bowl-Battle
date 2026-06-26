@@ -320,7 +320,30 @@ export class GameWorld {
         }
     }
     
+    lastGameWidth: number = GAME_WIDTH;
+    
+    handleResize(oldWidth: number, newWidth: number) {
+        // Adjust bot position if it's anchored to the right side
+        if (this.bot.pos.x > oldWidth / 2) {
+            const distanceFromRight = oldWidth - this.bot.pos.x;
+            this.bot.pos.x = newWidth - distanceFromRight;
+        }
+        if (this.player.pos.x > oldWidth / 2) {
+            const distanceFromRight = oldWidth - this.player.pos.x;
+            this.player.pos.x = newWidth - distanceFromRight;
+        }
+        if (this.ball.pos.x > oldWidth / 2) {
+            const distanceFromRight = oldWidth - this.ball.pos.x;
+            this.ball.pos.x = newWidth - distanceFromRight;
+        }
+    }
+    
     update(dt: number) {
+        if (this.lastGameWidth !== GAME_WIDTH) {
+            this.handleResize(this.lastGameWidth, GAME_WIDTH);
+            this.lastGameWidth = GAME_WIDTH;
+        }
+
         if (this.timeLeft > 0 && this.subState !== GameSubState.CELEBRATION) {
             this.timeLeft -= dt;
             if (this.timeLeft < 0) this.timeLeft = 0;
