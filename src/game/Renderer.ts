@@ -92,9 +92,11 @@ export class Renderer {
             }
         
             const runSpeed = isStunned ? 0 : Math.abs(velX);
-            const runCycle = now * 0.015 * (runSpeed / 100);
-            const bounceY = (runSpeed > 10 && !isTackling) ? Math.abs(Math.sin(runCycle)) * 12 : 0;
+            const isRunning = runSpeed > 10;
+            const runCycle = isRunning ? now * 0.015 * (runSpeed / 100) : 0;
+            const idleCycle = isRunning ? 0 : now * 0.003;
             
+            const bounceY = isRunning && !isTackling ? Math.abs(Math.sin(runCycle)) * 12 : Math.sin(idleCycle) * 3;
             const faceDir = dirX !== 0 ? dirX : 1;
             
             const headS = 45; 
@@ -106,8 +108,10 @@ export class Renderer {
             
             const imgHead = spritePrefix ? getImage('sprites.' + spritePrefix + '_head') : null;
             const imgBody = spritePrefix ? getImage('sprites.' + spritePrefix + '_body') : null;
-            const imgArm = spritePrefix ? getImage('sprites.' + spritePrefix + '_arm') : null;
-            const imgLeg = spritePrefix ? getImage('sprites.' + spritePrefix + '_leg') : null;
+            const imgArmFront = spritePrefix ? getImage('sprites.' + spritePrefix + '_arm_front') : null;
+            const imgArmBack = spritePrefix ? getImage('sprites.' + spritePrefix + '_arm_back') : null;
+            const imgLegFront = spritePrefix ? getImage('sprites.' + spritePrefix + '_leg_front') : null;
+            const imgLegBack = spritePrefix ? getImage('sprites.' + spritePrefix + '_leg_back') : null;
 
             const drawPart = (img: HTMLImageElement | null, px: number, py: number, defaultSize: number, rotation: number = 0) => {
                 if (!img) return false;
@@ -125,16 +129,18 @@ export class Renderer {
             
             // Back Arm
             const bArmY = cy - drawH + headS + 15 + bounceY;
-            const bArmX = cx + Math.sin(runCycle + Math.PI) * 20 * (runSpeed>10?1:0);
-            if (!drawPart(imgArm, bArmX, bArmY, handS * 3)) {
+            const bArmX = cx + (isRunning ? Math.sin(runCycle + Math.PI) * 20 : Math.cos(idleCycle) * 2);
+            const bArmRot = isRunning ? -Math.sin(runCycle + Math.PI) * Math.PI/4 : Math.sin(idleCycle) * 0.1;
+            if (!drawPart(imgArmBack, bArmX, bArmY, handS * 3, bArmRot)) {
                 ctx.fillStyle = skinColor;
                 ctx.beginPath(); ctx.arc(bArmX, bArmY, handS, 0, Math.PI*2); ctx.fill();
             }
             
             // Back Leg (Shoe)
-            const bLegY = cy - shoeS/2 - (runSpeed>10 ? Math.max(0, Math.sin(runCycle + Math.PI) * 15) : 0);
-            const bLegX = cx + Math.cos(runCycle + Math.PI) * 20 * (runSpeed>10?1:0);
-            if (!drawPart(imgLeg, bLegX, bLegY, shoeS * 1.5)) {
+            const bLegY = cy - shoeS/2 - (isRunning ? Math.max(0, Math.sin(runCycle + Math.PI) * 15) : 0);
+            const bLegX = cx + (isRunning ? Math.cos(runCycle + Math.PI) * 20 : -10);
+            const bLegRot = isRunning ? Math.cos(runCycle + Math.PI) * Math.PI/6 : 0;
+            if (!drawPart(imgLegBack, bLegX, bLegY, shoeS * 1.5, bLegRot)) {
                 ctx.fillStyle = '#222'; 
                 ctx.beginPath(); ctx.ellipse(bLegX, bLegY, shoeS, shoeS/1.5, 0, 0, Math.PI*2); ctx.fill();
                 ctx.fillStyle = '#0ff'; // Neon laces
@@ -153,9 +159,9 @@ export class Renderer {
             }
             
             // Front Leg (Shoe)
-            let fLegY = cy - shoeS/2 - (runSpeed>10 ? Math.max(0, Math.sin(runCycle) * 15) : 0);
-            let fLegX = cx + Math.cos(runCycle) * 20 * (runSpeed>10?1:0);
-            let fLegRot = 0;
+            let fLegY = cy - shoeS/2 - (isRunning ? Math.max(0, Math.sin(runCycle) * 15) : 0);
+            let fLegX = cx + (isRunning ? Math.cos(runCycle) * 20 : 10);
+            let fLegRot = isRunning ? Math.cos(runCycle) * Math.PI/6 : 0;
             if (isKicking) {
                 fLegY = cy - 40;
                 fLegX = cx + faceDir * 40;
@@ -165,7 +171,7 @@ export class Renderer {
                 fLegX = cx + faceDir * 30;
                 fLegRot = -Math.PI/8;
             }
-            if (!drawPart(imgLeg, fLegX, fLegY, shoeS * 1.5, fLegRot)) {
+            if (!drawPart(imgLegFront, fLegX, fLegY, shoeS * 1.5, fLegRot)) {
                 ctx.fillStyle = primaryColor; 
                 ctx.beginPath(); ctx.ellipse(fLegX, fLegY, shoeS, shoeS/1.5, 0, 0, Math.PI*2); ctx.fill();
                 ctx.fillStyle = '#fff'; 
@@ -215,14 +221,14 @@ export class Renderer {
             
             // Front Arm
             let fArmY = cy - drawH + headS + 15 + bounceY;
-            let fArmX = cx + Math.sin(runCycle) * 20 * (runSpeed>10?1:0);
-            let fArmRot = 0;
+            let fArmX = cx + (isRunning ? Math.sin(runCycle) * 20 : Math.sin(idleCycle) * 2);
+            let fArmRot = isRunning ? -Math.sin(runCycle) * Math.PI/4 : -Math.sin(idleCycle) * 0.1;
             if (isTackling) {
                 fArmX = cx + faceDir * 35;
                 fArmY = cy - drawH + headS + 10;
                 fArmRot = -Math.PI/4;
             }
-            if (!drawPart(imgArm, fArmX, fArmY, handS * 3, fArmRot)) {
+            if (!drawPart(imgArmFront, fArmX, fArmY, handS * 3, fArmRot)) {
                 ctx.fillStyle = skinColor;
                 ctx.beginPath(); ctx.arc(fArmX, fArmY, handS, 0, Math.PI*2); ctx.fill();
                 ctx.fillStyle = '#fff'; // Sweatband
