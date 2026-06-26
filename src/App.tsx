@@ -101,6 +101,17 @@ export default function App() {
   const handlePlayClick = () => {
     updateGameState(GameState.LOADING);
     
+    // Try to lock orientation and go fullscreen
+    try {
+        if (document.documentElement.requestFullscreen) {
+            document.documentElement.requestFullscreen().catch(() => {});
+        }
+        const orientation: any = screen.orientation || (screen as any).mozOrientation || (screen as any).msOrientation;
+        if (orientation && orientation.lock) {
+            orientation.lock('landscape').catch(() => {});
+        }
+    } catch (e) {}
+    
     // start loading
     loadAssets().then(() => {
         let progress = 0;
@@ -132,6 +143,14 @@ export default function App() {
   const [scale, setScale] = useState(1);
 
   useEffect(() => {
+      // Try best-effort orientation lock on mount for PWAs
+      try {
+          const orientation: any = screen.orientation || (screen as any).mozOrientation || (screen as any).msOrientation;
+          if (orientation && orientation.lock) {
+              orientation.lock('landscape').catch(() => {});
+          }
+      } catch (e) {}
+
       // [FIX] Layout hack for Mobile Safe Area / 100vh bugs
       const nudgeLayout = () => {
           const root = document.getElementById('root');
@@ -332,9 +351,9 @@ export default function App() {
   return (
     <div className="game-container select-none">
       <div className="rotate-warning">
-         <span className="text-4xl">📱</span>
+         <span className="rotate-icon">📱</span>
          <h1 className="text-2xl font-bold">Obróć telefon do poziomu</h1>
-         <p>Gra wymaga układu horyzontalnego (Landscape 16:9)</p>
+         <p>Gra wymaga układu horyzontalnego</p>
       </div>
 
       {(gameState === GameState.SPLASH || gameState === GameState.LOADING) && (

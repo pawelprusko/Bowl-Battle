@@ -38,7 +38,8 @@ html, body {
     .rotate-warning {
         position: fixed;
         inset: 0;
-        background: black;
+        background: rgba(0, 0, 0, 0.85);
+        backdrop-filter: blur(5px);
         color: white;
         z-index: 9999;
         display: flex;
@@ -48,6 +49,17 @@ html, body {
         gap: 1rem;
         font-family: sans-serif;
         text-align: center;
+    }
+    
+    .rotate-icon {
+        font-size: 4rem;
+        animation: rotatePhone 2s infinite ease-in-out;
+    }
+    
+    @keyframes rotatePhone {
+        0% { transform: rotate(0deg); }
+        50% { transform: rotate(-90deg); }
+        100% { transform: rotate(-90deg); }
     }
 }
 @media (orientation: landscape) {
