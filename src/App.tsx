@@ -555,7 +555,7 @@ export default function App() {
                        style={{
                            paddingLeft: 'max(1.5rem, env(safe-area-inset-left))',
                            paddingRight: 'max(1.5rem, env(safe-area-inset-right))',
-                           paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))'
+                           paddingBottom: 'max(0.2rem, env(safe-area-inset-bottom))'
                        }}
                    >
                        {/* D-PAD Left */}
