@@ -9,7 +9,7 @@ const TriangleButton = ({ dir, onDown, onUp, onLeave }: { dir: 'left' | 'right',
     const isLeft = dir === 'left';
     return (
         <div 
-            className="w-[96px] h-[80px] relative cursor-pointer touch-none select-none drop-shadow-xl group"
+            className="w-[116px] h-[96px] relative cursor-pointer touch-none select-none drop-shadow-xl group"
             onPointerDown={onDown}
             onPointerUp={onUp}
             onPointerLeave={onLeave}
@@ -61,13 +61,13 @@ const TriangleButton = ({ dir, onDown, onUp, onLeave }: { dir: 'left' | 'right',
 
 const ActionButton = ({ text, onDown, onUp, onLeave }: any) => (
     <div 
-        className="w-[96px] h-[80px] relative cursor-pointer touch-none select-none drop-shadow-xl group"
+        className="w-[140px] h-[96px] relative cursor-pointer touch-none select-none drop-shadow-xl group"
         onPointerDown={onDown}
         onPointerUp={onUp}
         onPointerLeave={onLeave}
         onContextMenu={(e) => e.preventDefault()}
     >
-        <svg viewBox="0 0 100 75" className="absolute top-0 left-0 w-full h-full overflow-visible">
+        <svg viewBox="0 0 110 75" className="absolute top-0 left-0 w-full h-full overflow-visible">
             <defs>
                 <linearGradient id="btnGrad" x1="0%" y1="0%" x2="0%" y2="100%">
                     <stop offset="0%" stopColor="#fbbf24" />
@@ -81,13 +81,13 @@ const ActionButton = ({ text, onDown, onUp, onLeave }: any) => (
             <g>
                 {/* 3D Bottom/Shadow */}
                 <rect 
-                    x="5" y="13" width="90" height="50" rx="15" ry="15"
+                    x="5" y="13" width="100" height="50" rx="15" ry="15"
                     fill="#c2410c"
                     className="group-active:hidden"
                 />
                 {/* Main Button Body */}
                 <rect 
-                    x="5" y="5" width="90" height="50" rx="15" ry="15"
+                    x="5" y="5" width="100" height="50" rx="15" ry="15"
                     fill="url(#btnGrad)" 
                     stroke="#431407"
                     strokeWidth="3" 
@@ -95,7 +95,7 @@ const ActionButton = ({ text, onDown, onUp, onLeave }: any) => (
                 />
             </g>
         </svg>
-        <div className="absolute top-0 left-0 w-full h-full flex items-center justify-center text-[16px] font-black tracking-widest text-white pointer-events-none pb-[8px] group-active:pb-0 group-active:pt-[8px]" style={{ textShadow: '0 2px 4px rgba(0,0,0,0.6)' }}>
+        <div className="absolute top-0 left-0 w-full h-full flex items-center justify-center text-[20px] font-black tracking-widest text-white pointer-events-none pb-[8px] group-active:pb-0 group-active:pt-[8px]" style={{ textShadow: '0 2px 4px rgba(0,0,0,0.6)' }}>
             {text}
         </div>
     </div>
@@ -154,10 +154,17 @@ function SplashFallback({ onPlay, gameState, loadingProgress }: { onPlay: () => 
                             bottom: '-4px'
                         }}
                     >
+                        <style>{`
+                            @keyframes loader-bounce {
+                                0%, 100% { transform: translateY(0); }
+                                50% { transform: translateY(-4px); }
+                            }
+                        `}</style>
                         <img 
                             src={ASSET_PATHS.ui.loader} 
                             alt="Loader" 
                             className="h-9 w-auto object-contain drop-shadow-md"
+                            style={{ animation: 'loader-bounce 0.4s infinite ease-in-out' }}
                         />
                     </div>
                 </div>
@@ -544,11 +551,11 @@ export default function App() {
                 {/* Mobile Controls Overlay */}
                 {gameState === GameState.PLAYING && (
                    <div 
-                       className="absolute bottom-0 left-0 w-full h-full pointer-events-none p-4 flex justify-between items-end pb-8 z-10"
+                       className="absolute bottom-0 left-0 w-full h-full pointer-events-none p-4 flex justify-between items-end pb-1 z-10"
                        style={{
                            paddingLeft: 'max(1.5rem, env(safe-area-inset-left))',
                            paddingRight: 'max(1.5rem, env(safe-area-inset-right))',
-                           paddingBottom: 'max(2rem, env(safe-area-inset-bottom))'
+                           paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))'
                        }}
                    >
                        {/* D-PAD Left */}
