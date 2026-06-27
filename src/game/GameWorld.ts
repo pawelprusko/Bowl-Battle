@@ -344,7 +344,7 @@ export class GameWorld {
             this.lastGameWidth = GAME_WIDTH;
         }
 
-        if (this.timeLeft > 0 && this.subState !== GameSubState.CELEBRATION) {
+        if (this.timeLeft > 0 && this.subState !== GameSubState.CELEBRATION && this.subState !== GameSubState.COUNTDOWN) {
             this.timeLeft -= dt;
             if (this.timeLeft < 0) this.timeLeft = 0;
         }
@@ -860,7 +860,7 @@ export class GameWorld {
         attacker.isRetreating = true;
 
         // Show message without pausing
-        this.acquiredMessage = attacker === this.player ? "P1 GOT THE BALL!" : "BOT GOT THE BALL!";
+        this.acquiredMessage = attacker === this.player ? "P1 GOT THE BALL!" : "SWEATYSTEVE GOT THE BALL!";
         this.botAvoidTimer = 1.0; // Wait a moment before chasing
     }
     
@@ -882,8 +882,8 @@ export class GameWorld {
         const rightPlayer = leftPlayer === this.player ? this.bot : this.player;
         
         const midX = (this.player.pos.x + this.bot.pos.x) / 2;
-        leftPlayer.pos.x = midX - leftPlayer.size.x/2 - 5;
-        rightPlayer.pos.x = midX - rightPlayer.size.x/2 + 5;
+        leftPlayer.pos.x = midX - leftPlayer.size.x/2 - 15;
+        rightPlayer.pos.x = midX - rightPlayer.size.x/2 + 15;
         this.player.vel.set(0, 0);
         this.bot.vel.set(0, 0);
         
@@ -908,7 +908,7 @@ export class GameWorld {
             this.celebrationMessage = "P1 TOUCHDOWN!";
         } else {
             this.botScore += 6;
-            this.celebrationMessage = "BOT TOUCHDOWN!";
+            this.celebrationMessage = "SWEATYSTEVE TOUCHDOWN!";
         }
         
         this.subState = GameSubState.CELEBRATION;
@@ -971,7 +971,7 @@ export class GameWorld {
                  this.celebrationMessage = "P1 EXTRA POINT!";
              } else {
                  this.botScore += 1;
-                 this.celebrationMessage = "BOT EXTRA POINT!";
+                 this.celebrationMessage = "SWEATYSTEVE EXTRA POINT!";
              }
              this.spawnParticles(this.ball.pos.x, this.ball.pos.y, 'perfect', 50);
              this.subState = GameSubState.CELEBRATION;
@@ -985,7 +985,7 @@ export class GameWorld {
             this.celebrationMessage = "P1 FIELD GOAL!";
         } else {
             this.botScore += 3;
-            this.celebrationMessage = "BOT FIELD GOAL!";
+            this.celebrationMessage = "SWEATYSTEVE FIELD GOAL!";
         }
         
         this.subState = GameSubState.CELEBRATION;

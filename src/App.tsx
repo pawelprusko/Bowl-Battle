@@ -5,6 +5,102 @@ import { Renderer } from './game/Renderer';
 import { loadAssets } from './game/assets';
 import { updateGameDimensions, ASSET_PATHS } from './game/constants';
 
+const TriangleButton = ({ dir, onDown, onUp, onLeave }: { dir: 'left' | 'right', onDown: () => void, onUp: () => void, onLeave: () => void }) => {
+    const isLeft = dir === 'left';
+    return (
+        <div 
+            className="w-[96px] h-[80px] relative cursor-pointer touch-none select-none drop-shadow-xl group"
+            onPointerDown={onDown}
+            onPointerUp={onUp}
+            onPointerLeave={onLeave}
+            onContextMenu={(e) => e.preventDefault()}
+        >
+            <svg viewBox="0 0 100 75" className="w-full h-full overflow-visible">
+                <defs>
+                    <linearGradient id="btnGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" stopColor="#fbbf24" />
+                        <stop offset="100%" stopColor="#f97316" />
+                    </linearGradient>
+                    <linearGradient id="btnGradActive" x1="0%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" stopColor="#f59e0b" />
+                        <stop offset="100%" stopColor="#ea580c" />
+                    </linearGradient>
+                </defs>
+                <g>
+                    {/* 3D Bottom/Shadow */}
+                    <path 
+                        d={isLeft ? "M 85 13 Q 95 13 95 23 L 95 53 Q 95 63 85 63 L 25 43 Q 10 38 25 33 Z" 
+                                  : "M 15 13 Q 5 13 5 23 L 5 53 Q 5 63 15 63 L 75 43 Q 90 38 75 33 Z"} 
+                        fill="#c2410c"
+                        className="group-active:hidden"
+                    />
+                    {/* Main Button Body */}
+                    <path 
+                        d={isLeft ? "M 85 5 Q 95 5 95 15 L 95 45 Q 95 55 85 55 L 25 35 Q 10 30 25 25 Z" 
+                                  : "M 15 5 Q 5 5 5 15 L 5 45 Q 5 55 15 55 L 75 35 Q 90 30 75 25 Z"} 
+                        fill="url(#btnGrad)" 
+                        stroke="#431407"
+                        strokeWidth="3" 
+                        className="group-active:translate-y-2 group-active:fill-[url(#btnGradActive)] transition-transform"
+                    />
+                    {/* Inner Icon */}
+                    <path 
+                        d={isLeft ? "M 66 21 L 48 30 L 66 39 Z" : "M 34 21 L 52 30 L 34 39 Z"} 
+                        fill="#fff" 
+                        stroke="#fff"
+                        strokeWidth="7"
+                        strokeLinejoin="round"
+                        opacity="0.95"
+                        className="group-active:translate-y-2 transition-transform"
+                    />
+                </g>
+            </svg>
+        </div>
+    );
+};
+
+const ActionButton = ({ text, onDown, onUp, onLeave }: any) => (
+    <div 
+        className="w-[96px] h-[80px] relative cursor-pointer touch-none select-none drop-shadow-xl group"
+        onPointerDown={onDown}
+        onPointerUp={onUp}
+        onPointerLeave={onLeave}
+        onContextMenu={(e) => e.preventDefault()}
+    >
+        <svg viewBox="0 0 100 75" className="absolute top-0 left-0 w-full h-full overflow-visible">
+            <defs>
+                <linearGradient id="btnGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" stopColor="#fbbf24" />
+                    <stop offset="100%" stopColor="#f97316" />
+                </linearGradient>
+                <linearGradient id="btnGradActive" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" stopColor="#f59e0b" />
+                    <stop offset="100%" stopColor="#ea580c" />
+                </linearGradient>
+            </defs>
+            <g>
+                {/* 3D Bottom/Shadow */}
+                <rect 
+                    x="5" y="13" width="90" height="50" rx="15" ry="15"
+                    fill="#c2410c"
+                    className="group-active:hidden"
+                />
+                {/* Main Button Body */}
+                <rect 
+                    x="5" y="5" width="90" height="50" rx="15" ry="15"
+                    fill="url(#btnGrad)" 
+                    stroke="#431407"
+                    strokeWidth="3" 
+                    className="group-active:translate-y-2 group-active:fill-[url(#btnGradActive)] transition-transform"
+                />
+            </g>
+        </svg>
+        <div className="absolute top-0 left-0 w-full h-full flex items-center justify-center text-[16px] font-black tracking-widest text-white pointer-events-none pb-[8px] group-active:pb-0 group-active:pt-[8px]" style={{ textShadow: '0 2px 4px rgba(0,0,0,0.6)' }}>
+            {text}
+        </div>
+    </div>
+);
+
 function SplashFallback({ onPlay, gameState, loadingProgress }: { onPlay: () => void, gameState: GameState, loadingProgress: number }) {
     const [imageFailed, setImageFailed] = useState(false);
     
@@ -406,30 +502,42 @@ export default function App() {
                 
                 {/* HUD Overlay */}
                 <div 
-                    className="absolute top-0 left-0 w-full p-4 flex justify-between items-start pointer-events-none z-10"
+                    className="absolute top-0 left-0 w-full p-4 flex justify-center items-start pointer-events-none z-10 gap-2"
                     style={{
-                        paddingLeft: 'max(1rem, env(safe-area-inset-left))',
-                        paddingRight: 'max(1rem, env(safe-area-inset-right))',
                         paddingTop: 'max(1rem, env(safe-area-inset-top))'
                     }}
                 >
-                    <div className="bg-black/50 text-white px-6 py-2 rounded text-2xl font-bold font-mono">
-                        P1: <span className="text-cyan-400">{hudState.pScore}</span>
+                    {/* Player Side */}
+                    <div className="flex flex-col items-end">
+                        <div className="bg-white/20 backdrop-blur-sm px-4 py-1 rounded-t-lg text-white text-xs font-bold uppercase tracking-wider w-32 text-center">
+                            SaltySam
+                        </div>
+                        <div className="bg-black/60 backdrop-blur-md text-white px-8 py-2 rounded-l-xl rounded-br-xl text-3xl font-black border-y border-l border-white/20 shadow-lg min-w-[80px] text-center">
+                            {hudState.pScore}
+                        </div>
                     </div>
-                    
-                    <div className="flex flex-col items-center">
-                        <div className="bg-black/80 border-2 border-yellow-400 text-yellow-400 px-8 py-2 rounded-lg text-4xl font-black font-mono">
+
+                    {/* Timer */}
+                    <div className="flex flex-col items-center z-20" style={{ marginTop: '0.2rem' }}>
+                        <div className="bg-black/80 text-white px-6 py-2 rounded-xl text-4xl font-black font-mono border-2 border-white/20 shadow-lg relative overflow-hidden">
+                            <div className="absolute inset-0 bg-gradient-to-b from-white/10 to-transparent"></div>
                             {hudState.time}
                         </div>
                         {hudState.message && (
-                            <div className="mt-2 text-xl font-bold text-white bg-red-500 px-4 py-1 rounded animate-bounce">
+                            <div className="absolute top-20 text-xl font-bold text-white bg-gradient-to-r from-red-600 to-rose-500 px-6 py-2 rounded-full border-2 border-white/50 shadow-xl animate-bounce">
                                 {hudState.message}
                             </div>
                         )}
                     </div>
                     
-                    <div className="bg-black/50 text-white px-6 py-2 rounded text-2xl font-bold font-mono">
-                        BOT: <span className="text-red-400">{hudState.bScore}</span>
+                    {/* Bot Side */}
+                    <div className="flex flex-col items-start">
+                        <div className="bg-white/20 backdrop-blur-sm px-4 py-1 rounded-t-lg text-white text-xs font-bold uppercase tracking-wider w-32 text-center">
+                            SweatySteve
+                        </div>
+                        <div className="bg-black/60 backdrop-blur-md text-white px-8 py-2 rounded-r-xl rounded-bl-xl text-3xl font-black border-y border-r border-white/20 shadow-lg min-w-[80px] text-center">
+                            {hudState.bScore}
+                        </div>
                     </div>
                 </div>
                 
@@ -438,52 +546,44 @@ export default function App() {
                    <div 
                        className="absolute bottom-0 left-0 w-full h-full pointer-events-none p-4 flex justify-between items-end pb-8 z-10"
                        style={{
-                           paddingLeft: 'max(1rem, env(safe-area-inset-left))',
-                           paddingRight: 'max(1rem, env(safe-area-inset-right))',
+                           paddingLeft: 'max(1.5rem, env(safe-area-inset-left))',
+                           paddingRight: 'max(1.5rem, env(safe-area-inset-right))',
                            paddingBottom: 'max(2rem, env(safe-area-inset-bottom))'
                        }}
                    >
                        {/* D-PAD Left */}
-                       <div className="flex gap-2 pointer-events-auto">
-                           <button 
-                               className="w-20 h-20 bg-white/20 active:bg-white/40 border border-white/50 rounded-full flex items-center justify-center text-white text-3xl select-none"
-                               onPointerDown={() => handleDirBtn(-1)}
-                               onPointerUp={() => handleDirBtn(0)}
-                               onPointerLeave={() => handleDirBtn(0)}
-                           >
-                               ◄
-                           </button>
-                           <button 
-                               className="w-20 h-20 bg-white/20 active:bg-white/40 border border-white/50 rounded-full flex items-center justify-center text-white text-3xl select-none"
-                               onPointerDown={() => handleDirBtn(1)}
-                               onPointerUp={() => handleDirBtn(0)}
-                               onPointerLeave={() => handleDirBtn(0)}
-                           >
-                               ►
-                           </button>
+                       <div className="flex gap-6 pointer-events-auto">
+                           <TriangleButton 
+                               dir="left"
+                               onDown={() => handleDirBtn(-1)}
+                               onUp={() => handleDirBtn(0)}
+                               onLeave={() => handleDirBtn(0)}
+                           />
+                           <TriangleButton 
+                               dir="right"
+                               onDown={() => handleDirBtn(1)}
+                               onUp={() => handleDirBtn(0)}
+                               onLeave={() => handleDirBtn(0)}
+                           />
                        </div>
                        
                        {/* Action Buttons Right */}
                        <div className="flex gap-4 pointer-events-auto items-end">
                            {hudState.subState === 'SCRUM_MATRIX' && !hudState.isExtraPoint && (
-                               <button 
-                                   className="w-24 h-24 bg-red-500/50 active:bg-red-500/80 border-2 border-red-500 rounded-full flex items-center justify-center text-white font-bold text-xl select-none"
-                                   onPointerDown={handleTacklePress}
-                                   onPointerUp={handleTackleRelease}
-                                   onPointerLeave={handleTackleRelease}
-                               >
-                                   TACKLE
-                               </button>
+                               <ActionButton 
+                                   text="TACKLE"
+                                   onDown={handleTacklePress}
+                                   onUp={handleTackleRelease}
+                                   onLeave={handleTackleRelease}
+                               />
                            )}
                            {hudState.isExtraPoint && hudState.playerRole === 'ATTACKER' && (
-                               <button 
-                                   className="w-28 h-28 bg-yellow-500/50 active:bg-yellow-500/80 border-2 border-yellow-500 rounded-full flex items-center justify-center text-white font-bold text-2xl select-none mb-4"
-                                   onPointerDown={handleKickPress}
-                                   onPointerUp={handleKickRelease}
-                                   onPointerLeave={handleKickRelease}
-                               >
-                                   KICK
-                               </button>
+                               <ActionButton 
+                                   text="KICK"
+                                   onDown={handleKickPress}
+                                   onUp={handleKickRelease}
+                                   onLeave={handleKickRelease}
+                               />
                            )}
                        </div>
                    </div>
@@ -494,7 +594,7 @@ export default function App() {
                     <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center text-white z-50">
                         <h2 className="text-6xl font-black mb-4">MATCH OVER</h2>
                         <p className="text-3xl mb-8">
-                            {hudState.pScore > hudState.bScore ? 'YOU WIN!' : hudState.pScore < hudState.bScore ? 'BOT WINS!' : 'DRAW!'}
+                            {hudState.pScore > hudState.bScore ? 'YOU WIN!' : hudState.pScore < hudState.bScore ? 'SWEATYSTEVE WINS!' : 'DRAW!'}
                         </p>
                         <button 
                             onClick={handlePlayClick}
