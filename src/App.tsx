@@ -17,13 +17,13 @@ const TriangleButton = ({ dir, onDown, onUp, onLeave }: { dir: 'left' | 'right',
         >
             <svg viewBox="0 0 100 75" className="w-full h-full overflow-visible">
                 <defs>
-                    <linearGradient id="btnGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                        <stop offset="0%" stopColor="#fbbf24" />
-                        <stop offset="100%" stopColor="#f97316" />
+                    <linearGradient id="btnGradDir" x1="0%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" stopColor="#e9d5ff" />
+                        <stop offset="100%" stopColor="#d8b4fe" />
                     </linearGradient>
-                    <linearGradient id="btnGradActive" x1="0%" y1="0%" x2="0%" y2="100%">
-                        <stop offset="0%" stopColor="#f59e0b" />
-                        <stop offset="100%" stopColor="#ea580c" />
+                    <linearGradient id="btnGradActiveDir" x1="0%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" stopColor="#d8b4fe" />
+                        <stop offset="100%" stopColor="#c084fc" />
                     </linearGradient>
                 </defs>
                 <g>
@@ -31,23 +31,23 @@ const TriangleButton = ({ dir, onDown, onUp, onLeave }: { dir: 'left' | 'right',
                     <path 
                         d={isLeft ? "M 85 13 Q 95 13 95 23 L 95 53 Q 95 63 85 63 L 25 43 Q 10 38 25 33 Z" 
                                   : "M 15 13 Q 5 13 5 23 L 5 53 Q 5 63 15 63 L 75 43 Q 90 38 75 33 Z"} 
-                        fill="#c2410c"
+                        fill="#3b0764"
                         className="group-active:hidden"
                     />
                     {/* Main Button Body */}
                     <path 
                         d={isLeft ? "M 85 5 Q 95 5 95 15 L 95 45 Q 95 55 85 55 L 25 35 Q 10 30 25 25 Z" 
                                   : "M 15 5 Q 5 5 5 15 L 5 45 Q 5 55 15 55 L 75 35 Q 90 30 75 25 Z"} 
-                        fill="url(#btnGrad)" 
-                        stroke="#431407"
-                        strokeWidth="3" 
-                        className="group-active:translate-y-2 group-active:fill-[url(#btnGradActive)] transition-transform"
+                        fill="url(#btnGradDir)" 
+                        stroke="#fff"
+                        strokeWidth="3"
+                        className="group-active:translate-y-2 group-active:fill-[url(#btnGradActiveDir)] transition-transform"
                     />
                     {/* Inner Icon */}
                     <path 
-                        d={isLeft ? "M 66 21 L 48 30 L 66 39 Z" : "M 34 21 L 52 30 L 34 39 Z"} 
-                        fill="#fff" 
-                        stroke="#fff"
+                        d={isLeft ? "M 70 21 L 52 30 L 70 39 Z" : "M 30 21 L 48 30 L 30 39 Z"} 
+                        fill="#a855f7" 
+                        stroke="#a855f7"
                         strokeWidth="7"
                         strokeLinejoin="round"
                         opacity="0.95"
@@ -69,33 +69,33 @@ const ActionButton = ({ text, onDown, onUp, onLeave }: any) => (
     >
         <svg viewBox="0 0 110 75" className="absolute top-0 left-0 w-full h-full overflow-visible">
             <defs>
-                <linearGradient id="btnGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                    <stop offset="0%" stopColor="#fbbf24" />
-                    <stop offset="100%" stopColor="#f97316" />
+                <linearGradient id="btnGradAction" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" stopColor="#e9d5ff" />
+                    <stop offset="100%" stopColor="#d8b4fe" />
                 </linearGradient>
-                <linearGradient id="btnGradActive" x1="0%" y1="0%" x2="0%" y2="100%">
-                    <stop offset="0%" stopColor="#f59e0b" />
-                    <stop offset="100%" stopColor="#ea580c" />
+                <linearGradient id="btnGradActiveAction" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" stopColor="#d8b4fe" />
+                    <stop offset="100%" stopColor="#c084fc" />
                 </linearGradient>
             </defs>
             <g>
                 {/* 3D Bottom/Shadow */}
                 <rect 
                     x="5" y="13" width="100" height="50" rx="15" ry="15"
-                    fill="#c2410c"
+                    fill="#3b0764"
                     className="group-active:hidden"
                 />
                 {/* Main Button Body */}
                 <rect 
                     x="5" y="5" width="100" height="50" rx="15" ry="15"
-                    fill="url(#btnGrad)" 
-                    stroke="#431407"
-                    strokeWidth="3" 
-                    className="group-active:translate-y-2 group-active:fill-[url(#btnGradActive)] transition-transform"
+                    fill="url(#btnGradAction)" 
+                    stroke="#fff"
+                    strokeWidth="3"
+                    className="group-active:translate-y-2 group-active:fill-[url(#btnGradActiveAction)] transition-transform"
                 />
             </g>
         </svg>
-        <div className="absolute top-0 left-0 w-full h-full flex items-center justify-center text-[20px] font-black tracking-widest text-white pointer-events-none pb-[8px] group-active:pb-0 group-active:pt-[8px]" style={{ textShadow: '0 2px 4px rgba(0,0,0,0.6)' }}>
+        <div className="absolute top-0 left-0 w-full h-full flex items-center justify-center text-[20px] font-black tracking-widest text-[#a855f7] pointer-events-none pb-[16px] group-active:translate-y-2 transition-transform">
             {text}
         </div>
     </div>
@@ -125,8 +125,8 @@ function SplashFallback({ onPlay, gameState, loadingProgress }: { onPlay: () => 
             {gameState === GameState.SPLASH && (
                 <button 
                     onClick={onPlay}
-                    className="px-12 py-3 bg-violet-500/50 backdrop-blur-xs text-white text-3xl font-semibold rounded-2xl border-2 border-white/80 shadow-[0_0_15px_rgba(255,255,255,0.4)] animate-bounce z-10 hover:bg-violet-400/80 hover:scale-105 active:scale-95 transition-all duration-300"
-                    style={{ position: 'absolute', bottom: '14%', animationDuration: '2.5s' }}
+                    className="px-12 py-3 bg-purple-500/40 backdrop-blur-sm text-white text-3xl font-semibold rounded-2xl border-2 border-white shadow-[0_4px_15px_rgba(168,85,247,0.6)] animate-bounce z-10 hover:bg-purple-400/60 hover:scale-105 active:scale-95 transition-all duration-300"
+                    style={{ position: 'absolute', bottom: '14%', animationDuration: '2.5s', textShadow: '0 2px 4px rgba(0,0,0,0.6)' }}
                 >
                     PLAY
                 </button>
@@ -134,7 +134,7 @@ function SplashFallback({ onPlay, gameState, loadingProgress }: { onPlay: () => 
 
             {gameState === GameState.LOADING && (
                 <div 
-                    className="absolute z-10 w-1/3 max-w-sm h-5 bg-violet-500/50 backdrop-blur-xs rounded-lg border border-white/80 shadow-[0_0_15px_rgba(255,255,255,0.4)] flex items-center"
+                    className="absolute z-10 w-1/3 max-w-sm h-5 bg-purple-500/40 backdrop-blur-sm rounded-lg border-2 border-white shadow-[0_0_15px_rgba(168,85,247,0.4)] flex items-center"
                     style={{ bottom: '15%' }}
                 >
                     <div 
@@ -551,15 +551,15 @@ export default function App() {
                 {/* Mobile Controls Overlay */}
                 {gameState === GameState.PLAYING && (
                    <div 
-                       className="absolute bottom-0 left-0 w-full h-full pointer-events-none p-4 flex justify-between items-end pb-1 z-10"
+                       className="absolute bottom-0 left-0 w-full h-full pointer-events-none p-4 flex justify-between items-end pb-0 z-10"
                        style={{
                            paddingLeft: 'max(1.5rem, env(safe-area-inset-left))',
                            paddingRight: 'max(1.5rem, env(safe-area-inset-right))',
-                           paddingBottom: 'max(0.2rem, env(safe-area-inset-bottom))'
+                           paddingBottom: 'max(0px, env(safe-area-inset-bottom))'
                        }}
                    >
                        {/* D-PAD Left */}
-                       <div className="flex gap-6 pointer-events-auto">
+                       <div className="flex gap-6 pointer-events-auto translate-y-4">
                            <TriangleButton 
                                dir="left"
                                onDown={() => handleDirBtn(-1)}
@@ -575,7 +575,7 @@ export default function App() {
                        </div>
                        
                        {/* Action Buttons Right */}
-                       <div className="flex gap-4 pointer-events-auto items-end">
+                       <div className="flex gap-4 pointer-events-auto items-end translate-y-4">
                            {hudState.subState === 'SCRUM_MATRIX' && !hudState.isExtraPoint && (
                                <ActionButton 
                                    text="TACKLE"
@@ -605,7 +605,8 @@ export default function App() {
                         </p>
                         <button 
                             onClick={handlePlayClick}
-                            className="px-8 py-3 bg-cyan-500 text-black font-bold text-2xl rounded"
+                            className="px-8 py-3 bg-purple-500 text-white font-black tracking-widest text-2xl rounded-xl border-2 border-white hover:bg-purple-400 active:scale-95 transition-all"
+                            style={{ textShadow: '0 2px 4px rgba(0,0,0,0.4)' }}
                         >
                             PLAY AGAIN
                         </button>

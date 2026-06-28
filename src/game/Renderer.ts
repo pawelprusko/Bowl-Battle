@@ -503,7 +503,7 @@ export class Renderer {
 
             if (world.isChargingKick) {
                 // "KOPNIĘCIE!" Label
-                ctx.fillStyle = '#ff9f1c';
+                ctx.fillStyle = '#c084fc';
                 ctx.font = 'bold 24px Impact, sans-serif';
                 ctx.textAlign = 'center';
                 ctx.fillText("KOPNIĘCIE!", GAME_WIDTH / 2, ky - 10);
@@ -515,7 +515,7 @@ export class Renderer {
         }
 
         if (world.bigTackleTimer > 0) {
-            ctx.fillStyle = '#ff9f1c';
+            ctx.fillStyle = '#c084fc';
             ctx.font = 'bold 80px Impact, sans-serif';
             ctx.textAlign = 'center';
             ctx.globalAlpha = world.bigTackleTimer;
@@ -542,16 +542,16 @@ export class Renderer {
             ctx.shadowOffsetY = 15;
             
             // Text Stroke (Outline)
-            ctx.strokeStyle = '#b43b00';
+            ctx.strokeStyle = '#2e1065';
             ctx.lineWidth = 18;
             ctx.strokeText(count.toString(), 0, 0);
             
             // Text Fill with Gradient
             const grad = ctx.createLinearGradient(0, -90, 0, 90);
-            grad.addColorStop(0, '#fffa82');
-            grad.addColorStop(0.4, '#ffb703');
-            grad.addColorStop(0.6, '#fb8500');
-            grad.addColorStop(1, '#d00000');
+            grad.addColorStop(0, '#d8b4fe'); // purple-300
+            grad.addColorStop(0.4, '#a855f7'); // purple-500
+            grad.addColorStop(0.6, '#7e22ce'); // purple-700
+            grad.addColorStop(1, '#3b0764'); // purple-950
             
             ctx.shadowColor = 'transparent'; // Remove shadow for fill
             ctx.fillStyle = grad;
