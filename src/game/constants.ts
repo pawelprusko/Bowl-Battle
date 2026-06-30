@@ -34,6 +34,20 @@ export const ASSET_PATHS = {
     }
 };
 
+export const AUDIO_PATHS = {
+    bgm: {
+        board: '/assets/audio/bgm_board.mp3',
+        scrum: '/assets/audio/bgm_scrum.mp3'
+    },
+    sfx: {
+        kickoff: '/assets/audio/sfx_kickoff.mp3',
+        hit: '/assets/audio/sfx_hit.mp3',
+        kick: '/assets/audio/sfx_kick.mp3',
+        cheer: '/assets/audio/sfx_cheer.mp3',
+        boo: '/assets/audio/sfx_boo.mp3'
+    }
+};
+
 export const PHYSICS = {
     gravity: 600, // pt per sec^2
     maxRunSpeed: 160,

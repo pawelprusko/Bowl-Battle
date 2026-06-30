@@ -530,7 +530,7 @@ const drawStylishText = (text: string, x: number, y: number, fontSize: number, g
             }
         }
         
-        if (world.acquiredMessage) {
+if (world.acquiredMessage) {
              const scale = 1.0 + Math.sin(now / 180) * 0.05; // same bounce for everything
              ctx.save();
              ctx.translate(GAME_WIDTH/2, 160); // slightly lower
@@ -542,38 +542,117 @@ const drawStylishText = (text: string, x: number, y: number, fontSize: number, g
              ctx.restore();
         }
 
+// RYSOWANIE STRZAŁKI NAPROWADZAJĄCEJ DO PRZYŁOŻENIA
+        if (world.showRunArrow) {
+            ctx.save();
+            
+            // --- TUTAJ REGULUJESZ ANIMACJĘ I POZYCJĘ STRZAŁKI ---
+            const bounceX = Math.sin(now * 0.005) * 7;   // 0.005 = wolniejsza prędkość, 7 = krótszy/delikatniejszy skok
+            const arrowX = GAME_WIDTH - 85 + bounceX;    // Zmniejszone do 85, aby strzałka była tuż przy marginesie krawędzi
+            const arrowY = GROUND_Y - 75;                // Zmienione ze 110 na 75, aby strzałka wisiała wyraźnie niżej
+            // ----------------------------------------------------
+
+            ctx.translate(arrowX, arrowY);
+
+            // Tworzenie ścieżki wektorowej dla ostrej, komiksowej strzałki w prawo (➔)
+            ctx.beginPath();
+            ctx.moveTo(-35, -12); // Góra ogona strzałki
+            ctx.lineTo(0, -12);   // Łączenie ogona z grotem
+            ctx.lineTo(0, -26);   // Tył grota góra
+            ctx.lineTo(32, 0);    // Sam czubek (grot skierowany w prawo)
+            ctx.lineTo(0, 26);    // Tył grota dół
+            ctx.lineTo(0, 12);    // Łączenie dolne
+            ctx.lineTo(-35, 12);  // Dół ogona strzałki
+            ctx.closePath();
+
+            // 1. Renderowanie grubego, białego outline'u pod spodem
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.lineWidth = 7;
+            ctx.lineJoin = 'round';
+            ctx.stroke();
+
+            // 2. Wypełnienie wnętrza fioletem zdefiniowanym w grze (#AF5BF4)
+            ctx.fillStyle = '#AF5BF4';
+            ctx.fill();
+
+            ctx.restore();
+        }
+
         // Draw Kick meter depending on if it's Extra Point time
         if (world.isExtraPointAttempt) {
-            const kw = 400; // wide meter at top
-            const kh = 24;
+            const kw = 333; // 1/3 of GAME_WIDTH
+            const kh = 20;  // h-5
             const kx = GAME_WIDTH / 2 - kw / 2;
-            const ky = 60;
+            const ky = 140; // moved down, slightly higher than messages at 160
             
-            ctx.fillStyle = '#555';
-            ctx.fillRect(kx - 2, ky - 2, kw + 4, kh + 4);
+            // Outer shadow
+            ctx.save();
+            ctx.shadowColor = 'rgba(168,85,247,0.4)';
+            ctx.shadowBlur = 15;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
             
+            // White outline
+            ctx.fillStyle = '#fff';
+            ctx.roundRect(kx - 2, ky - 2, kw + 4, kh + 4, 8);
+            ctx.fill();
+            ctx.restore();
+            
+            // Inner background mask
+            ctx.save();
+            ctx.beginPath();
+            ctx.roundRect(kx, ky, kw, kh, 6);
+            ctx.clip();
+
+            // Background (purple-ish like splash screen)
+            ctx.fillStyle = 'rgba(168,85,247,0.4)';
+            ctx.fillRect(kx, ky, kw, kh);
+
             // Orange (too early) 0-70
-            ctx.fillStyle = world.isChargingKick ? '#ffb703' : '#a37a00'; 
+            ctx.fillStyle = world.isChargingKick ? 'rgba(255, 183, 3, 0.9)' : 'rgba(163, 122, 0, 0.7)'; 
             ctx.fillRect(kx, ky, kw * 0.7, kh);
             
             // Green (perfect) 70-90
-            ctx.fillStyle = world.isChargingKick ? '#2ec4b6' : '#1b7068';
+            ctx.fillStyle = world.isChargingKick ? 'rgba(46, 196, 182, 0.9)' : 'rgba(27, 112, 104, 0.7)';
             ctx.fillRect(kx + kw * 0.7, ky, kw * 0.2, kh);
             
             // Red (too late) 90-100
-            ctx.fillStyle = world.isChargingKick ? '#e63946' : '#852129';
+            ctx.fillStyle = world.isChargingKick ? 'rgba(230, 57, 70, 0.9)' : 'rgba(133, 33, 41, 0.7)';
             ctx.fillRect(kx + kw * 0.9, ky, kw * 0.1, kh);
+            
+            ctx.restore(); // remove clip
+
+            // Show 'KICK THE BALL!' if it's the player's turn to kick, so they know what to do!
+            const scale = 1.0 + Math.sin(now / 180) * 0.05;
+            ctx.save();
+            ctx.translate(GAME_WIDTH / 2, ky - 20); // Moved down to avoid overlapping the score UI
+            ctx.scale(scale, scale);
+            if (world.player.role === 'ATTACKER') {
+                drawStylishText("KICK THE BALL!", 0, 0, 24, fioletColors);
+            } else {
+                drawStylishText("OPPONENT KICKING!", 0, 0, 24, ['#ef233c', '#d90429']);
+            }
+            ctx.restore();
 
             if (world.isChargingKick) {
-                // "KOPNIĘCIE!" Label
-                ctx.fillStyle = '#c084fc';
-                ctx.font = 'bold 24px Impact, sans-serif';
-                ctx.textAlign = 'center';
-                ctx.fillText("KOPNIĘCIE!", GAME_WIDTH / 2, ky - 10);
-                
-                // Marker
-                ctx.fillStyle = '#fff';
-                ctx.fillRect(kx + (kw * world.kickPower/100) - 2, ky-5, 4, kh+10);
+                // Ball Marker
+                const ballImg = getImage('sprites.ball');
+                const markerX = kx + (kw * world.kickPower/100);
+                const markerSize = 32; // w-8 h-8
+                if (ballImg) {
+                    ctx.save();
+                    ctx.shadowColor = 'rgba(0,0,0,0.8)';
+                    ctx.shadowBlur = 4;
+                    ctx.shadowOffsetY = 2;
+                    // Draw ball centered horizontally, resting on the bottom of the bar
+                    ctx.drawImage(ballImg, markerX - markerSize / 2, ky + kh - markerSize + 4, markerSize, markerSize);
+                    ctx.restore();
+                } else {
+                    ctx.fillStyle = '#fff';
+                    ctx.beginPath();
+                    ctx.arc(markerX, ky + kh / 2, 8, 0, Math.PI * 2);
+                    ctx.fill();
+                }
             }
         }
 

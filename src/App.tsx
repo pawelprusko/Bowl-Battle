@@ -3,6 +3,7 @@ import { GameState } from './game/Types';
 import { GameWorld } from './game/GameWorld';
 import { Renderer } from './game/Renderer';
 import { loadAssets } from './game/assets';
+import { loadAudio, setBGM, stopBGM } from './game/audio';
 import { updateGameDimensions, ASSET_PATHS } from './game/constants';
 
 const TriangleButton = ({ dir, onDown, onUp, onLeave }: { dir: 'left' | 'right', onDown: () => void, onUp: () => void, onLeave: () => void }) => {
@@ -295,7 +296,7 @@ export default function App() {
     updateGameState(GameState.REMATCH_LOADING);
     
     // start loading
-    loadAssets().then(() => {
+    Promise.all([loadAssets(), loadAudio()]).then(() => {
         let progress = 0;
         const interval = setInterval(() => {
             progress += 100 / (4.0 / 0.1); // 4 seconds total
@@ -326,7 +327,7 @@ export default function App() {
     } catch (e) {}
     
     // start loading
-    loadAssets().then(() => {
+    Promise.all([loadAssets(), loadAudio()]).then(() => {
         let progress = 0;
         const interval = setInterval(() => {
             progress += 100 / (4.0 / 0.1); // 4 seconds total
@@ -439,6 +440,7 @@ export default function App() {
   useEffect(() => {
       // Start or resume the game loop whenever we enter PLAYING state
       if (gameState === GameState.PLAYING) {
+          setBGM('board');
           if (canvasRef.current) {
               // Always recreate renderer to ensure it holds the newly mounted canvas
               rendererRef.current = new Renderer(canvasRef.current);
@@ -446,6 +448,8 @@ export default function App() {
           lastTimeRef.current = performance.now();
           if (animationRef.current) cancelAnimationFrame(animationRef.current);
           gameLoop(performance.now());
+      } else {
+          stopBGM();
       }
       return () => {
           if (animationRef.current) {
