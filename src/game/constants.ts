@@ -29,7 +29,8 @@ export const ASSET_PATHS = {
     },
     ui: {
         splashscreen: '/assets/images/splashscreen.jpg',
-        loader: '/assets/images/loader.png'
+        loader: '/assets/images/loader.png',
+        matchover: '/assets/images/matchover.jpg'
     }
 };
 

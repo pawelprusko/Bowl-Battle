@@ -1,4 +1,4 @@
-import { GameWorld, PhysicalBody } from './GameWorld';
+import { GameWorld, PhysicalBody, Player } from './GameWorld';
 import { GAME_WIDTH, GAME_HEIGHT, GROUND_Y } from './constants';
 import { getImage, isFallback } from './assets';
 import { GameSubState, PlayerRole } from './Types';
@@ -259,7 +259,7 @@ export class Renderer {
         };
 
         // Draw Player Shadows
-        const drawPlayerShadow = (p: PhysicalBody, stunTimer: number) => {
+        const drawPlayerShadow = (p: Player, stunTimer: number) => {
              let isLaying = p.knockbackTimer > 0 || stunTimer > 0;
              let shadowW = isLaying ? 55 : 30;
              let shadowH = isLaying ? 12 : 7;
@@ -364,15 +364,44 @@ export class Renderer {
         }
 
         // Draw Ball
-        const ballImg = getImage('sprites.ball');
+        let ballVisX = world.ball.pos.x;
+        let ballVisY = world.ball.pos.y;
+        let ballSpin = world.ball.vel.x !== 0 ? (now / 100) * (world.ball.vel.x > 0 ? 1 : -1) : 0;
+        
+        if (isBallHeld) {
+            const attacker = world.player.role === PlayerRole.ATTACKER ? world.player : world.bot;
+            
+            if (world.subState === GameSubState.SCRUM_MATRIX) {
+                const faceDir = attacker.facingX;
+                // SCRUM lean offset
+                ballVisX += faceDir * 10;
+                ballVisY += 10;
+            } else if (attacker.onGround) {
+                const runSpeed = Math.abs(attacker.vel.x);
+                const isRunning = runSpeed > 10;
+                const runCycle = isRunning ? now * 0.015 * (runSpeed / 100) : 0;
+                const idleCycle = isRunning ? 0 : now * 0.003;
+                const bounceY = isRunning ? Math.abs(Math.sin(runCycle)) * 12 : Math.sin(idleCycle) * 3;
+                ballVisY += bounceY * 0.8; // Torso bounce offset
+            }
+            ballSpin = 0; // Don't spin when held
+        }
+
+const ballImg = getImage('sprites.ball');
+        
+        // Aktywacja neonowej poświaty wokół tekstury lub kształtu piłki na bazie koloru ognia
+        if (world.ball.flameColor !== 'NONE') {
+            ctx.save();
+            ctx.shadowBlur = 25;
+            ctx.shadowColor = world.ball.flameColor === 'PURPLE' ? '#EC0DE3' : '#6BBED9';
+        }
+
         if (ballImg) {
-             ctx.drawImage(ballImg, world.ball.pos.x, world.ball.pos.y, world.ball.size.x, world.ball.size.y);
+             ctx.drawImage(ballImg, ballVisX, ballVisY, world.ball.size.x, world.ball.size.y);
         } else {
              ctx.save();
-             ctx.translate(world.ball.pos.x + world.ball.size.x/2, world.ball.pos.y + world.ball.size.y/2);
-             // Spin ball if moving
-             const spin = world.ball.vel.x !== 0 ? (now / 100) * (world.ball.vel.x > 0 ? 1 : -1) : 0;
-             ctx.rotate(spin);
+             ctx.translate(ballVisX + world.ball.size.x/2, ballVisY + world.ball.size.y/2);
+             ctx.rotate(ballSpin);
              
              ctx.fillStyle = '#a0522d';
              ctx.strokeStyle = '#fff';
@@ -391,9 +420,17 @@ export class Renderer {
              ctx.restore();
         }
 
+        if (world.ball.flameColor !== 'NONE') {
+            ctx.restore();
+        }
+
         // Draw Particles
         for (const p of world.particles) {
-            ctx.fillStyle = p.type === 'hit' ? '#ff9f1c' : p.type === 'perfect' ? '#2ec4b6' : p.type === 'miss' ? '#e63946' : '#fff';
+            ctx.fillStyle = p.type === 'hit' ? '#ff9f1c' : 
+                            p.type === 'perfect' ? '#2ec4b6' : 
+                            p.type === 'miss' ? '#e63946' : 
+                            p.type === 'flame_purple' ? '#EC0DE3' : 
+                            p.type === 'flame_blue' ? '#6BBED9' : '#fff';
             ctx.globalAlpha = Math.min(1, p.life * 2);
             
             if (p.type === 'touchdown' || p.type === 'fieldgoal' || p.type === 'perfect') {
@@ -431,52 +468,78 @@ export class Renderer {
         // --- BEGIN FIXED ON-SCREEN HUD ---
         ctx.save();
         
-        // Draw Scrum Bars
-        if (world.subState === GameSubState.SCRUM_MATRIX) {
+const drawStylishText = (text: string, x: number, y: number, fontSize: number, gradColors: string[]) => {
+            const upperText = text.toUpperCase();
+            ctx.save();
+            ctx.translate(x, y);
             
-            const drawGiantScrumBar = (percent: number, released: boolean, power: number, isLeft: boolean) => {
-                const bw = GAME_WIDTH * 0.45; // Massive horizontal bar (45% of width)
-                const bh = 40; // thick
-                const bx = isLeft ? 15 : GAME_WIDTH - 15 - bw;
-                const by = 120; // Lowered to avoid HUD message overlap
-                
-                // Background
-                ctx.fillStyle = '#111';
-                ctx.strokeStyle = isLeft ? '#4361ee' : '#e63946';
-                ctx.lineWidth = 4;
-                ctx.fillRect(bx, by, bw, bh);
-                ctx.strokeRect(bx, by, bw, bh);
-                
-                // Perfect zone (80% to 88%)
-                const perfStart = isLeft ? bx + bw * 0.8 : bx + bw * 0.12;
-                ctx.fillStyle = '#1b7068';
-                ctx.fillRect(perfStart, by, bw * 0.08, bh);
-                
-                // Fill
-                if (released) {
-                    if (power === 100) {
-                        ctx.fillStyle = '#2ec4b6'; // perfect
-                        ctx.fillRect(isLeft ? bx : bx + bw - bw * 0.84, by, bw * 0.84, bh);
-                    } else if (power === 0) {
-                        ctx.fillStyle = '#e63946'; // fail
-                        ctx.fillRect(bx, by, bw, bh);
-                    } else {
-                        ctx.fillStyle = '#ffb703'; // early
-                        const w = bw * (0.8 * (power-10)/70);
-                        ctx.fillRect(isLeft ? bx : bx + bw - w, by, w, bh); 
-                    }
-                } else {
-                    ctx.fillStyle = isLeft ? '#4361ee' : '#e63946';
-                    const w = bw * Math.min(1, percent);
-                    ctx.fillRect(isLeft ? bx : bx + bw - w, by, w, bh);
-                }
-            };
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.font = `900 ${fontSize}px "Arial Black", Impact, sans-serif`;
+            
+            const scaleFactor = fontSize / 180;
+            const visualScale = Math.max(0.6, scaleFactor);
+            
+            // Lekki rozmyty podkład pod napisem dla lepszego kontrastu z tłumem
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.35)';
+            ctx.shadowBlur = 8 * visualScale;
+            ctx.shadowOffsetY = 6 * visualScale;
+            
+            // WARSTWA 1 (Cień 3D): Czyste, ciemnofioletowe wypełnienie przesunięte w dół i prawo (+X, +Y).
+            const offsetX = 6 * visualScale;
+            const offsetY = 8 * visualScale;
+            ctx.fillStyle = '#2e1065';
+            ctx.fillText(upperText, offsetX, offsetY);
+            
+            // Całkowicie wyłączamy rozmycie cienia przed nałożeniem frontu, by zachować idealną ostrość
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetY = 0;
+            
+            // NOWY ULTRA-JASNY GRADIENT (Zgodny z Twoim screenem): 
+            // Górna połowa litery lśni jasną bielą i pastelowym fioletem, dolna schodzi do żywego, nasyconego fioletu.
+            // Eliminujemy ciemne kolory, by zachować maksymalną czytelność.
+            const grad = ctx.createLinearGradient(0, -fontSize/2, 0, fontSize/2);
+            grad.addColorStop(0, '#F3E8FF');       // Czysta, rozświetlona biel na samym czubku
+            grad.addColorStop(0.25, '#E9D5FF');    // Bardzo jasny lawendowy pastel
+            grad.addColorStop(0.65, '#d8b4fe');    // Świeży, wyraźny jasny fiolet
+            grad.addColorStop(1, '#a855f7');       // Żywy, nasycony fiolet na dole (doskonale kontrastuje z ramką #2e1065)
+            
+            // WARSTWA 2 (Główne lico): Ostra, ciemna ramka komiksowa + nowy, super jasny gradient
+            ctx.strokeStyle = '#2e1065';
+            ctx.lineWidth = 10 * scaleFactor + 1.5; 
+            ctx.strokeText(upperText, 0, 0);
+            
+            ctx.fillStyle = grad;
+            ctx.fillText(upperText, 0, 0);
+            
+            ctx.restore();
+        };
 
-            const pPercent = world.player.scrumCharging ? world.player.scrumChargeTimer / world.scrumDuration : 0;
-            const bPercent = world.bot.scrumCharging ? world.bot.scrumChargeTimer / world.scrumDuration : 0;
+        const fioletColors = ['#d8b4fe', '#a855f7', '#7e22ce', '#3b0764'];
 
-            drawGiantScrumBar(pPercent, world.player.scrumReleased, world.player.scrumPower, true);
-            drawGiantScrumBar(bPercent, world.bot.scrumReleased, world.bot.scrumPower, false);
+        // Draw Scrum PUSH/HOLD Prompts
+        if (world.subState === GameSubState.SCRUM_MATRIX) {
+            if (world.scrumPrompt) {
+                 const scale = 1.0 + Math.sin(now / 180) * 0.05; // same bounce as "GO!"
+                 ctx.save();
+                 ctx.translate(GAME_WIDTH/2, 160); // slightly lower
+                 ctx.scale(scale, scale);
+                 drawStylishText(world.scrumPrompt + "!", 0, 0, 35, fioletColors); // fiolet
+                 ctx.restore();
+            }
+        }
+        
+        if (world.acquiredMessage) {
+             const scale = 1.0 + Math.sin(now / 180) * 0.05; // same bounce for everything
+             ctx.save();
+             ctx.translate(GAME_WIDTH/2, 160); // slightly lower
+             ctx.scale(scale, scale);
+             drawStylishText(world.acquiredMessage, 0, 0, 35, fioletColors); // fiolet and smaller
+             if (world.acquiredMessage2) {
+                 drawStylishText(world.acquiredMessage2, 0, 40, 21, fioletColors); // smaller
+             }
+             ctx.restore();
         }
 
         // Draw Kick meter depending on if it's Extra Point time
@@ -578,7 +641,8 @@ export class Renderer {
         
         ctx.globalCompositeOperation = 'lighter';
         
-        const lines = isTackling ? 6 : 4;
+// INTENSYWNIEJSZE SMUGI: Zwiększono liczbę linii (z 4 na 6 przy zwykłym sprincie), tworząc znacznie gęstszy ogon komety
+        const lines = isTackling ? 8 : 6;
         const trailLen = isTackling ? 100 : 50;
         const t = Date.now() / 100;
         
@@ -586,11 +650,15 @@ export class Renderer {
             const y = player.pos.y + (player.size.y / lines) * (i + 0.5);
             const phase = i * 2.5;
             const xWobble = Math.sin(t + phase) * 8;
-            const alpha = 0.3 + Math.sin(t * 1.5 + phase) * 0.3;
+            
+            // PODBITO WIDOCZNOŚĆ (Alpha): Zwiększono bazową jasność (z 0.3 na 0.5), by smugi były ostre i mocno świeciły na boisku
+            const alpha = 0.5 + Math.sin(t * 1.5 + phase) * 0.3;
             
             ctx.globalAlpha = alpha;
             ctx.beginPath();
-            ctx.lineWidth = isTackling ? 4 : 2;
+            
+            // POGRUBIONO LINIE: Zwiększono grubość pędzla (z 2px na 4px dla sprintu), dzięki czemu smuga zyskuje potężną głębię
+            ctx.lineWidth = isTackling ? 6 : 4;
             ctx.lineCap = 'round';
             
             const startX = player.pos.x + (dir > 0 ? 0 : player.size.x) - (dir * xWobble);

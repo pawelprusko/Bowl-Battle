@@ -3,7 +3,8 @@ export enum GameState {
     LOADING = 'LOADING',
     PLAYING = 'PLAYING',
     EXTRA_POINT = 'EXTRA_POINT',
-    GAME_OVER = 'GAME_OVER'
+    GAME_OVER = 'GAME_OVER',
+    REMATCH_LOADING = 'REMATCH_LOADING'
 }
 
 export enum PlayerRole {
