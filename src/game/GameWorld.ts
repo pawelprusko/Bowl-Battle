@@ -58,10 +58,11 @@ export class Player extends PhysicalBody {
     
     knockbackTimer: number = 0;
     
-    stats = { power: 100, speed: 100, defense: 100 };
+  stats = { power: 100, speed: 100, defense: 100 };
     debuffTimer: number = 0; // Keeping if needed for future skills
     stunTimer: number = 0;
     isWaitingForScrumRecovery: boolean = false;
+    scrumPushTimer: number = 0; // Nowy licznik czasu wyświetlania smug pędu przy parciu w przód
     isRetreating: boolean = false;
     isAtRetreatPos: boolean = false;
     
@@ -72,10 +73,15 @@ export class Player extends PhysicalBody {
         this.size.set(18, 36); // Increased character size 
     }
     
-    update(dt: number) {
+   update(dt: number) {
         if (this.knockbackTimer > 0) {
             this.knockbackTimer -= dt;
             if (this.knockbackTimer < 0) this.knockbackTimer = 0;
+        }
+        
+        if (this.scrumPushTimer > 0) {
+            this.scrumPushTimer -= dt;
+            if (this.scrumPushTimer < 0) this.scrumPushTimer = 0;
         }
         
 if (this.stunTimer > 0 || this.isWaitingForScrumRecovery) {
@@ -153,14 +159,14 @@ if (this.isRetreating) {
         
         // ZMIANA PROGU NA 7%: Zawodnik odpala turbo-sprint błyskawicznie, 
         // już po przebiegnięciu zaledwie 7% szerokości planszy (zamiast dotychczasowych 20%).
-        this.isBoosting = this.continuousRunDistance > GAME_WIDTH * 0.07;
+        this.isBoosting = this.continuousRunDistance > GAME_WIDTH * 0.06;
         
         const speedMultiplier = (this.stats.speed / 100);
         const acc = PHYSICS.runAcceleration * speedMultiplier * 1.5; // Slightly faster acceleration
         let maxS = (this.debuffTimer > 0 ? PHYSICS.maxRunSpeed * 0.5 : PHYSICS.maxRunSpeed) * speedMultiplier * 0.7;
         
         if (this.isBoosting) {
-            maxS *= 1.7;
+            maxS *= 2.0;
         }
         
         if (this.isTackling) {
@@ -313,10 +319,11 @@ scrumPromptTimer = 0;
     scrumBotPressDelay = 0;
     scrumBotReleaseDelay = 0;
     
-    kickPower = 0;
+  kickPower = 0;
     kickDir = 1;
     kickHoldTimer = 0;
     isChargingKick = false;
+    isPerfectKick = false; // Nowa flaga zapamiętująca czy aktualny lot piłki to udany, wysoki łuk
     
     countdownTimer = 3;
     
@@ -337,13 +344,18 @@ scrumPromptTimer = 0;
 isExtraPointAttempt = false;
     bigTackleTimer = 0;
     fumbleProtectTimer = 0;
-    freeBallTimer = 0;
+freeBallTimer = 0;
     showRunArrow = false; // Flaga dla renderera informująca o rysowaniu strzałki touchdownu
+    showPlayerArrow = false; // Flaga dla strzałki wskazującej gracza na samym początku meczu
+    scrumSlowMoTimer = 0; // Licznik kontrolujący kinowe, widowiskowe spowolnienie czasu na finiszu walki
+    pendingRunArrow = false; // Nowa flaga oczekiwania na zakończenie slow-motion przed pokazaniem strzałki TD
+    kickInputLockout = 0;    // Absolutna blokada chroniąca przed accidental-touch, ghost-clickami lub hoverem z UI
 
     celebrationTimeoutId: any = null;
 
-    constructor() {
+  constructor() {
         this.resetToSnap();
+        this.showPlayerArrow = true; // Włączamy strzałkę identyfikującą gracza TYLKO na początku pierwszej rundy
     }
     
     resetToSnap() {
@@ -378,12 +390,15 @@ isExtraPointAttempt = false;
         
 this.subState = GameSubState.COUNTDOWN;
         this.countdownTimer = 3;
-        this.isChargingKick = false;
+this.isChargingKick = false;
         this.kickPower = 0;
         this.kickDir = 1;
         this.kickHoldTimer = 0;
-        this.isExtraPointAttempt = false;
-        this.showRunArrow = false; // Schowanie strzałki przy restarcie
+this.isExtraPointAttempt = false;
+        this.isPerfectKick = false; // Resetowanie pamięci strzału przy nowej rundzie
+        this.showRunArrow = false;  // Schowanie strzałki przy restarcie
+        this.pendingRunArrow = false;
+        this.kickInputLockout = 0;
     }
     
     spawnParticles(x: number, y: number, type: string, count: number = 10) {
@@ -415,7 +430,28 @@ this.subState = GameSubState.COUNTDOWN;
         }
     }
     
-    update(dt: number) {
+update(dt: number) {
+        // FINAŁOWE SLOW MOTION: Jeśli walka w klinczu właśnie się zakończyła,
+        // drastycznie spowolniamy upływ czasu (ok. 8-krotnie), aby pokazać epickie uderzenie i bezwładny upadek postaci.
+        if (this.scrumSlowMoTimer > 0) {
+            dt *= 0.12; // Mnożnik spowolnienia (0.12). Fizyka i cząsteczki poruszają się jak w gęstym syropie!
+            this.scrumSlowMoTimer -= dt;
+            if (this.scrumSlowMoTimer <= 0) {
+                this.scrumSlowMoTimer = 0;
+                // POPRAWKA: Strzałka naprowadzająca pojawia się DOPIERO po wyjściu ze slow-motion i zoom-outu kamery!
+                if (this.pendingRunArrow) {
+                    this.showRunArrow = true;
+                    this.pendingRunArrow = false;
+                }
+            }
+        }
+
+        // Aktualizacja timera bezpieczeństwa dla paska wykopu
+        if (this.kickInputLockout > 0) {
+            this.kickInputLockout -= dt;
+            if (this.kickInputLockout < 0) this.kickInputLockout = 0;
+        }
+
         if (this.lastGameWidth !== GAME_WIDTH) {
             this.handleResize(this.lastGameWidth, GAME_WIDTH);
             this.lastGameWidth = GAME_WIDTH;
@@ -468,10 +504,11 @@ this.subState = GameSubState.COUNTDOWN;
             this.fumbleProtectTimer -= dt;
         }
 
-        if (this.subState === GameSubState.COUNTDOWN) {
+     if (this.subState === GameSubState.COUNTDOWN) {
             this.countdownTimer -= dt;
             this.ball.updatePhysics(dt, [this.player, this.bot]);
 if (this.countdownTimer <= 0) {
+                this.showPlayerArrow = false; // Strzałka nad graczem znika bezpowrotnie w ułamku sekundy wystrzału piłki
                 playSFX('kickoff');
                 this.subState = GameSubState.KICKOFF_LAUNCH;
                 this.ball.allowCeilingBounce = false;
@@ -518,16 +555,25 @@ if (this.countdownTimer <= 0) {
                  this.bot.vel.x = 0;
                  this.freeBallTimer += dt;
                  
-                 if (this.freeBallTimer > 1.0) {
+     if (this.freeBallTimer > 1.0) {
                      this.subState = GameSubState.REGULAR;
                      this.player.isRetreating = false;
                      this.bot.isRetreating = false;
                      this.botAvoidTimer = 0.2; // slight delay before engaging
-                     this.acquiredMessage = null; // Clear "GO!"
+                     this.acquiredMessage = null; // Clear
                      this.acquiredMessage2 = null;
                  } else if (this.freeBallTimer > 0.0) {
-                     this.acquiredMessage = "GO!";
+                     this.acquiredMessage = "HIT OPPONENT!"; // Jasny, bojowy komunikat dla graczy
                      this.acquiredMessage2 = null;
+                     
+                     // GWARANTOWANA BLOKADA UCIECZKI: Gracz na tym etapie zmierza w prawo. 
+                     // Jeśli próbuje wciskać strzałkę w lewo (w tył) – zerujemy jego intencję i pęd.
+                     if (this.player.dirX < 0) {
+                         this.player.dirX = 0;
+                     }
+                     if (this.player.vel.x < 0) {
+                         this.player.vel.x = 0;
+                     }
                  }
             }
         } else {
@@ -620,6 +666,7 @@ const lastInterval = Math.floor((this.scrumTimer - dt) / 2.0);
             const currentInterval = Math.floor(this.scrumTimer / 2.0);
             if (currentInterval > lastInterval && this.scrumTimer > 0.5) {
                 this.scrumOffset -= 72; 
+                this.bot.scrumPushTimer = 0.35; // Aktywacja smug dla bota przy potężnym, cyklicznym tąpnięciu
                 this.spawnParticles(this.bot.pos.x + this.bot.size.x/2, this.bot.pos.y, 'miss', 15);
                 this.screenShake = 0.4;
                 
@@ -781,7 +828,7 @@ const lastInterval = Math.floor((this.scrumTimer - dt) / 2.0);
             if (this.isChargingKick) {
                 this.kickHoldTimer += dt;
                 
-                this.kickPower += this.kickDir * dt * (100 / 1.8); // 1.2 sekundy do 100%
+                this.kickPower += this.kickDir * dt * (100 / 0.8); // 1.2 sekundy do 100%
                 if (this.kickPower > 100) { 
                     this.kickPower = 100;
                     this.kickDir = -1; // Bounce back down
@@ -800,17 +847,11 @@ const lastInterval = Math.floor((this.scrumTimer - dt) / 2.0);
                 }
             }
 
-        } else if (this.subState === GameSubState.BALL_IN_AIR) {
+} else if (this.subState === GameSubState.BALL_IN_AIR) {
             this.ball.updatePhysics(dt, [this.player, this.bot]);
             
-            // Check crossbar goals (Y < 150, appropriate X)
-            if (this.ball.pos.y < 150) {
-                if (this.player.role === PlayerRole.ATTACKER && this.ball.pos.x > GAME_WIDTH - 50) {
-                    this.scoreFieldGoal(this.player);
-                } else if (this.bot.role === PlayerRole.ATTACKER && this.ball.pos.x < 50) {
-                    this.scoreFieldGoal(this.bot);
-                }
-            }
+            // Stara, zawodna weryfikacja pozycji X/Y słupków została stąd całkowicie usunięta,
+            // ponieważ punkty za udany Extra Point są teraz przyznawane natychmiast i bezbłędnie w releaseKick().
             
             if (this.ball.pos.y >= GROUND_Y - this.ball.size.y) {
                 // Ball hits ground - fumble if not goal
@@ -868,8 +909,23 @@ const lastInterval = Math.floor((this.scrumTimer - dt) / 2.0);
             
             this.cameraX = this.scrumCameraStartX + (targetCenterX - this.scrumCameraStartX) * ease;
             this.cameraY = this.scrumCameraStartY + (targetCenterY - this.scrumCameraStartY) * ease;
+        } else if (this.scrumSlowMoTimer > 0) {
+            // POPRAWKA: Podczas finałowego Slow Motion zamrażamy aparat w pełnym zbliżeniu (1.25)
+            // i płynnie wyśrodkowujemy obiektyw dokładnie pomiędzy zawodnikami, aby uderzenie i powalenie były idealnie wyeksponowane.
+            const targetScale = 1.25;
+            this.cameraZoom = targetScale;
+            
+            let targetCenterX = (this.player.pos.x + this.bot.pos.x + this.player.size.x) / 2;
+            const targetCenterY = GROUND_Y - 50;
+            
+            const halfW = (GAME_WIDTH / 2) / targetScale;
+            if (targetCenterX < halfW) targetCenterX = halfW;
+            if (targetCenterX > GAME_WIDTH - halfW) targetCenterX = GAME_WIDTH - halfW;
+            
+            this.cameraX = targetCenterX;
+            this.cameraY = targetCenterY;
         } else {
-            // Zoom out quickly if we exit scrum state
+            // Zoom out quickly if we exit scrum state and slow-mo ends
             if (this.cameraZoom > 1.0) {
                 this.cameraZoom -= dt * 2.0;
                 if (this.cameraZoom < 1.0) this.cameraZoom = 1.0;
@@ -1050,12 +1106,11 @@ resolveScrumAction(actingPlayer: Player, action: 'PUSH' | 'HOLD', isBot: boolean
         if (actingPlayer.scrumCharging) return;
         actingPlayer.scrumCharging = true; 
         
-        // WYWAŻONY SPORTOWY SKOK: Zmniejszono o 15% (z 46 na 39). 
-        // Szarpnięcia przy kliknięciach nadal są mocne i satysfakcjonujące, ale nie rzucają postaciami chaotycznie po krawędziach ekranu.
         const pushAmount = 32; 
         
-        if (this.scrumPrompt === action) {
+        if (isActionCorrect) {
             // Prawidłowy refleks!
+            actingPlayer.scrumPushTimer = 0.25; // Zawodnik, który trafił w rytm, dostaje natychmiastowe smugi pędu w przód
             if (actingPlayer === this.player) {
                 this.scrumOffset += pushAmount;
                 this.spawnParticles(actingPlayer.pos.x + actingPlayer.size.x/2, actingPlayer.pos.y, 'perfect', 10);
@@ -1063,10 +1118,11 @@ resolveScrumAction(actingPlayer: Player, action: 'PUSH' | 'HOLD', isBot: boolean
                 this.scrumOffset -= pushAmount;
                 this.spawnParticles(actingPlayer.pos.x + actingPlayer.size.x/2, actingPlayer.pos.y, 'miss', 10);
             }
-} else {
+        } else {
             // Pudło / Zły przycisk!
             if (actingPlayer === this.player) {
                 this.scrumOffset -= pushAmount; // Kara dla gracza: krok do tyłu
+                this.bot.scrumPushTimer = 0.25; // Gracz spudłował, więc bot dynamicznie prze do przodu ze smugami!
                 this.spawnParticles(actingPlayer.pos.x + actingPlayer.size.x/2, actingPlayer.pos.y, 'miss', 10);
                 
                 // MOMENT 2: Szorstki, wyraźny sygnał błędu (140ms). Telefon błyskawicznie karze za pomyłkę.
@@ -1076,11 +1132,12 @@ resolveScrumAction(actingPlayer: Player, action: 'PUSH' | 'HOLD', isBot: boolean
             } else {
                 // Bot popełnił błąd – nagroda dla gracza: popychasz bota do przodu!
                 this.scrumOffset += pushAmount;
+                this.player.scrumPushTimer = 0.25; // Bot spudłował, więc gracz natychmiast zyskuje smugi przewagi!
                 this.spawnParticles(actingPlayer.pos.x + actingPlayer.size.x/2, actingPlayer.pos.y, 'hit', 10);
             }
         }
         
-// NATYCHMIASTOWE ZNIKNIĘCIE I REFRESH: Czyścimy aktualny prompt natychmiast po wykonaniu akcji
+        // NATYCHMIASTOWE ZNIKNIĘCIE I REFRESH: Czyścimy aktualny prompt natychmiast po wykonaniu akcji
         this.scrumPrompt = null;
         this.scrumPromptTimer = 0.16; // Bardzo krótka, dynamiczna przerwa (160ms) przed wylosowaniem nowego napisu
         
@@ -1090,6 +1147,7 @@ resolveScrumAction(actingPlayer: Player, action: 'PUSH' | 'HOLD', isBot: boolean
 resolveScrumWinner(playerWon: boolean) {
         this.subState = GameSubState.REGULAR;
         setBGM('board');
+        this.scrumSlowMoTimer = 0.4; // Ładujemy 0.4 sekundy czasu gry w zwolnionym tempie (co przełoży się na ok. 3.5 realnych sekund)
         
         const attacker = this.player.role === PlayerRole.ATTACKER ? this.player : this.bot;
         const defender = this.player.role === PlayerRole.DEFENDER ? this.player : this.bot;
@@ -1127,13 +1185,14 @@ this.screenShake = 0.5;
             this.spawnParticles(defender.pos.x, defender.pos.y, 'hit', 20);
             this.botAvoidTimer = 6.0; // Prevent immediate re-tackle after waking up
 
-            // Wygrana atakującego (Bieg po przyłożenie na prawą stronę)
+// Wygrana atakującego (Bieg po przyłożenie na prawą stronę)
             if (attacker === this.player) {
                 this.acquiredMessage = "GET THE TOUCHDOWN!";
-                this.showRunArrow = true; // Włączenie strzałki wskazującej prawą krawędź ekranu
+                this.pendingRunArrow = true; // POPRAWKA: Zamiast natychmiast odpalać strzałkę w zoomie, ustawiamy ją w stan oczekiwania na koniec slow-mo
             } else {
                 this.acquiredMessage = "OPPONENT GETTING THE TOUCHDOWN";
                 this.showRunArrow = false;
+                this.pendingRunArrow = false;
             }
                 } else {
                     // Defender wins!
@@ -1177,7 +1236,7 @@ this.screenShake = 0.5;
 
 
     
-  scoreTouchdown(player: Player) {
+scoreTouchdown(player: Player) {
         if (player === this.player) {
             this.playerScore += 6;
             this.celebrationMessage = "P1 TOUCHDOWN!";
@@ -1192,6 +1251,10 @@ this.screenShake = 0.5;
         this.acquiredMessage = null;
         this.showRunArrow = false; // NATYCHMIASTOWE UKRYCIE STRZAŁKI PO ZDOBYCIU TOUCHDOWNU (Rozwiązuje problem ze screena)
         this.spawnParticles(player.pos.x, player.pos.y, 'touchdown', 30);
+        
+        // POPRAWKA HUD: Soczysty wystrzał białych płomieni bezpośrednio wokół właściwej ramki punktowej na górze UI
+        const hudX = player === this.player ? 290 : 510;
+        this.spawnParticles(hudX, 45, 'touchdown', 40);
         
         if (this.celebrationTimeoutId) clearTimeout(this.celebrationTimeoutId);
         this.celebrationTimeoutId = setTimeout(() => {
@@ -1235,9 +1298,13 @@ this.screenShake = 0.5;
         this.kickPower = 0;
         this.kickDir = 1;
         this.kickHoldTimer = 0;
+        this.kickInputLockout = 0.5; // POPRAWKA: Pół sekundy pancernej blokady przed hoverami i ghost-clickami!
     }
     
-    scoreFieldGoal(player: Player) {
+scoreFieldGoal(player: Player) {
+        // Wyliczamy pozycję ramki UI dla gracza, który właśnie podwyższył wynik
+        const hudX = player === this.player ? 290 : 510;
+
         if (this.isExtraPointAttempt) {
              if (player === this.player) {
                  this.playerScore += 1;
@@ -1249,6 +1316,10 @@ this.screenShake = 0.5;
                  playSFX('boo');
              }
              this.spawnParticles(this.ball.pos.x, this.ball.pos.y, 'perfect', 50);
+             
+             // POPRAWKA HUD: Wystrzał cząsteczek na tablicy wyników po udanym Extra Point (Kick)
+             this.spawnParticles(hudX, 45, 'touchdown', 40);
+
              this.subState = GameSubState.CELEBRATION;
              if (this.celebrationTimeoutId) clearTimeout(this.celebrationTimeoutId);
              this.celebrationTimeoutId = setTimeout(() => this.resetToSnap(), 3000);
@@ -1267,12 +1338,25 @@ this.screenShake = 0.5;
         
         this.subState = GameSubState.CELEBRATION;
         this.spawnParticles(this.ball.pos.x, this.ball.pos.y, 'fieldgoal', 30);
+        
+        // POPRAWKA HUD: Wystrzał cząsteczek na tablicy wyników po udanym Field Goal z gry
+        this.spawnParticles(hudX, 45, 'touchdown', 40);
+
         if (this.celebrationTimeoutId) clearTimeout(this.celebrationTimeoutId);
         this.celebrationTimeoutId = setTimeout(() => this.resetToSnap(), 3000);
     }
     
-    startKick() {
+startKick() {
         if (this.player.role !== PlayerRole.ATTACKER || this.player.stunTimer > 0) return;
+        if (this.kickInputLockout > 0) return; // OCHRONA: Ignoruj kliknięcia przez pierwsze 500ms
+
+        // KRYTYCZNA POPRAWKA: Jeśli pasek już automatycznie lata od startu extra pointa,
+        // naciśnięcie przycisku KICK na ekranie (onDown) zatwierdza aktualną pozycję kulki (One-Click) i blokuje zerowanie!
+        if (this.subState === GameSubState.KICKING && this.isChargingKick) {
+            this.releaseKick();
+            return;
+        }
+
         this.subState = GameSubState.KICKING;
         this.isChargingKick = true;
         this.kickPower = 0;
@@ -1293,6 +1377,7 @@ this.screenShake = 0.5;
 playerTackle() {
         // MECHANIKA ONE-CLICK KICK: Pojedyncze naciśnięcie Tackle podczas wykopu natychmiast blokuje moc i odpala piłkę
         if (this.subState === GameSubState.KICKING && this.player.role === PlayerRole.ATTACKER && this.isChargingKick) {
+            if (this.kickInputLockout > 0) return; // OCHRONA: Ignoruj kliknięcia przez pierwsze 500ms
             this.releaseKick();
             return;
         }
@@ -1315,16 +1400,21 @@ playerTackle() {
 
 releaseKick() {
         if (this.subState !== GameSubState.KICKING) return;
+        if (this.kickInputLockout > 0) return; // OCHRONA: Ignoruj kliknięcia przez pierwsze 500ms
+        
+        // POPRAWKA BEZPIECZEŃSTWA: Jeśli pasek ładował się krócej niż 0.15 sekundy, całkowicie odrzucamy strzał!
+        // Zapobiega to automatycznemu, natychmiastowemu "wstrzeleniu" piłki na poziomie 0% mocy przez lingering-input.
+        if (this.kickHoldTimer < 0.15) return;
 
         this.isChargingKick = false;
         playSFX('kick');
         
-        // ZMIANA: Ukryty margines bezpieczeństwa (65 do 93) – niweluje opóźnienie ludzkiego palca na szybkim pasku!
+        // Okienko tolerancji zielonej strefy
         const isPerfect = this.kickPower >= 65 && this.kickPower <= 93;
+        this.isPerfectKick = isPerfect;
         
-        this.subState = GameSubState.BALL_IN_AIR;
         this.ball.onGround = false;
-        this.ball.ignoreWalls = true; // Pozwól piłce wylecieć za ekran
+        this.ball.ignoreWalls = true;
         
         const isPlayer = this.player.role === PlayerRole.ATTACKER;
         const dir = isPlayer ? 1 : -1;
@@ -1332,12 +1422,15 @@ releaseKick() {
         const startY = isPlayer ? this.player.pos.y : this.bot.pos.y;
 
         if (isPerfect) {
-            // Perfekcyjny strzał: Piękny, wysoki, stadionowy łuk nad poprzeczką
-            this.ball.vel.set(dir * 1500, -950); 
+            // Piłka leci wysoko w niebo
+            this.ball.vel.set(dir * 900, -950); 
             this.spawnParticles(startX, startY, 'perfect', 20);
+
+            // NATYCHMIASTOWE NALICZENIE: +1 punkt, dźwięk cheer i białe płomienie wokół tablicy wyników
+            this.scoreFieldGoal(isPlayer ? this.player : this.bot);
         } else {
-            // ZMIANA: Nieudany strzał dostaje teraz realną fizykę lotu (z -100 na -450 i moc w przód 550).
-            // Piłka uniesie się widowiskowo nad ziemię, ale spadnie przed bramką, dając naturalne uczucie chybienia!
+            // Pudło: brak punktów, piłka spada krótko przed bramką
+            this.subState = GameSubState.BALL_IN_AIR; 
             this.ball.vel.set(dir * 550, -450); 
             this.spawnParticles(startX, startY, 'miss', 10);
         }

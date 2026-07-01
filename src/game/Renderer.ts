@@ -280,12 +280,13 @@ export class Renderer {
         drawPlayerShadow(world.bot, botEffectiveStun);
         drawPlayerShadow(world.player, pEffectiveStun);
 
-        // Draw Bot
+// Draw Bot
         const botDir = world.bot.facingX;
         const botImg = getImage('sprites.bot');
         
-        if (world.bot.isTackling || world.bot.isBoosting) {
-             this.drawTrail(world.bot, botDir, '#fbc4ab', '#e63946', botImg, world.bot.isBoosting, world.bot.isTackling);
+        // POPRAWKA: Renderujemy smugi bota również wtedy, kiedy jego licznik parcia w przód w klinczu jest aktywny
+        if (world.bot.isTackling || world.bot.isBoosting || (world.subState === 'SCRUM_MATRIX' && world.bot.scrumPushTimer > 0)) {
+             this.drawTrail(world.bot, botDir, '#fbc4ab', '#e63946', botImg, world.bot.isBoosting || world.subState === 'SCRUM_MATRIX', world.bot.isTackling);
         }
         if (botImg) {
             ctx.save();
@@ -315,12 +316,13 @@ export class Renderer {
         }
         ctx.shadowBlur = 0;
         
-        // Draw Player
+  // Draw Player
         const pDir = world.player.facingX;
         const playerImg = getImage('sprites.player');
         
-        if (world.player.isTackling || world.player.isBoosting) {
-             this.drawTrail(world.player, pDir, '#ffcab0', '#4361ee', playerImg, world.player.isBoosting, world.player.isTackling);
+        // POPRAWKA: Renderujemy smugi gracza również wtedy, kiedy jego licznik parcia w przód w klinczu jest aktywny
+        if (world.player.isTackling || world.player.isBoosting || (world.subState === 'SCRUM_MATRIX' && world.player.scrumPushTimer > 0)) {
+             this.drawTrail(world.player, pDir, '#ffcab0', '#4361ee', playerImg, world.player.isBoosting || world.subState === 'SCRUM_MATRIX', world.player.isTackling);
         }
         if (playerImg) {
             ctx.save();
@@ -518,14 +520,15 @@ const drawStylishText = (text: string, x: number, y: number, fontSize: number, g
 
         const fioletColors = ['#d8b4fe', '#a855f7', '#7e22ce', '#3b0764'];
 
-        // Draw Scrum PUSH/HOLD Prompts
+// Draw Scrum PUSH/HOLD Prompts
         if (world.subState === GameSubState.SCRUM_MATRIX) {
             if (world.scrumPrompt) {
                  const scale = 1.0 + Math.sin(now / 180) * 0.05; // same bounce as "GO!"
                  ctx.save();
                  ctx.translate(GAME_WIDTH/2, 160); // slightly lower
                  ctx.scale(scale, scale);
-                 drawStylishText(world.scrumPrompt + "!", 0, 0, 35, fioletColors); // fiolet
+                 // POPRAWKA: Dodano słowo "PRESS ", dzięki czemu gracz widzi komunikat "PRESS PUSH!" lub "PRESS HOLD!"
+                 drawStylishText("PRESS " + world.scrumPrompt + "!", 0, 0, 35, fioletColors); 
                  ctx.restore();
             }
         }
@@ -540,6 +543,54 @@ if (world.acquiredMessage) {
                  drawStylishText(world.acquiredMessage2, 0, 40, 21, fioletColors); // smaller
              }
              ctx.restore();
+        }
+
+        // RYSOWANIE STRZAŁEK STARCIOWYCH (CLASH ARROWS) W TRWANIU STANU BALL_ACQUIRED
+        if (world.subState === GameSubState.BALL_ACQUIRED) {
+            ctx.save();
+            
+            // Dynamiczny, zsynchronizowany ruch napierania grotami na siebie (lewa w prawo, prawa w lewo)
+            const clashBounce = Math.sin(now * 0.008) * 12;
+            const centerY = 215; // Pozycja pionowa idealnie wpasowana pomiędzy komunikat tekstowy a zawodników
+            
+            ctx.lineWidth = 4;
+            ctx.lineJoin = 'round';
+            ctx.strokeStyle = '#FFFFFF'; // Biały outline ramy strzałek
+            ctx.fillStyle = '#AF5BF4';     // Czysty fiolet gry
+
+            // 1. Lewa strzałka celująca grotem w prawą stronę (➔)
+            ctx.save();
+            ctx.translate(GAME_WIDTH / 2 - 45 + clashBounce, centerY);
+            ctx.beginPath();
+            ctx.moveTo(-18, -6);
+            ctx.lineTo(0, -6);
+            ctx.lineTo(0, -14);
+            ctx.lineTo(16, 0);
+            ctx.lineTo(0, 14);
+            ctx.lineTo(0, 6);
+            ctx.lineTo(-18, 6);
+            ctx.closePath();
+            ctx.stroke();
+            ctx.fill();
+            ctx.restore();
+
+            // 2. Prawa strzałka celująca grotem w lewą stronę (⬅)
+            ctx.save();
+            ctx.translate(GAME_WIDTH / 2 + 45 - clashBounce, centerY);
+            ctx.beginPath();
+            ctx.moveTo(18, -6);
+            ctx.lineTo(0, -6);
+            ctx.lineTo(0, -14);
+            ctx.lineTo(-16, 0);
+            ctx.lineTo(0, 14);
+            ctx.lineTo(0, 6);
+            ctx.lineTo(18, 6);
+            ctx.closePath();
+            ctx.stroke();
+            ctx.fill();
+            ctx.restore();
+
+            ctx.restore();
         }
 
 // RYSOWANIE STRZAŁKI NAPROWADZAJĄCEJ DO PRZYŁOŻENIA
@@ -571,7 +622,42 @@ if (world.acquiredMessage) {
             ctx.lineJoin = 'round';
             ctx.stroke();
 
-            // 2. Wypełnienie wnętrza fioletem zdefiniowanym w grze (#AF5BF4)
+         // 2. Wypełnienie wnętrza fioletem zdefiniowanym w grze (#AF5BF4)
+            ctx.fillStyle = '#AF5BF4';
+            ctx.fill();
+
+            ctx.restore();
+        }
+
+        // RYSOWANIE PIONOWEJ STRZAŁKI WSKAZUJĄCEJ ZAWODNIKA GRACZA (NA START MECZU)
+        if (world.showPlayerArrow) {
+            ctx.save();
+            
+            // Delikatny, płynny pionowy skok (bounce) nad głową postaci
+            const bounceY = Math.sin(now * 0.005) * 7;
+            const arrowX = world.player.pos.x + world.player.size.x / 2;
+            const arrowY = world.player.pos.y - 65 + bounceY; // Bezpieczny punkt zawieszenia nad kaskiem
+
+            ctx.translate(arrowX, arrowY);
+
+            // Ścieżka wektorowa ostrej strzałki skierowanej grotem idealnie w dół (⬇)
+            ctx.beginPath();
+            ctx.moveTo(-12, -35); // Lewy górny róg ogona
+            ctx.lineTo(-12, 0);   // Spadek ogona do linii grota
+            ctx.lineTo(-26, 0);   // Lewe skrzydełko rozszerzenia grota
+            ctx.lineTo(0, 26);    // Sam szpiczasty czubek grota wskazujący zawodnika
+            ctx.lineTo(26, 0);    // Prawe skrzydełko rozszerzenia grota
+            ctx.lineTo(12, 0);    // Powrót grota do linii ogona
+            ctx.lineTo(12, -35);  // Prawy górny róg ogona
+            ctx.closePath();
+
+            // 1. Renderowanie grubego, białego outline'u pod spodem
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.lineWidth = 7;
+            ctx.lineJoin = 'round';
+            ctx.stroke();
+
+            // 2. Wypełnienie wnętrza fioletem gry (#AF5BF4)
             ctx.fillStyle = '#AF5BF4';
             ctx.fill();
 
@@ -695,7 +781,7 @@ if (world.acquiredMessage) {
             grad.addColorStop(0.6, '#7e22ce'); // purple-700
             grad.addColorStop(1, '#3b0764'); // purple-950
             
-            ctx.shadowColor = 'transparent'; // Remove shadow for fill
+ctx.shadowColor = 'transparent'; // Remove shadow for fill
             ctx.fillStyle = grad;
             ctx.fillText(count.toString(), 0, 0);
             
@@ -706,13 +792,43 @@ if (world.acquiredMessage) {
             ctx.restore();
         }
         
-        // Hide extra BLITZ text as we have KICKOFF red message
-        // removed KICKOFF_LAUNCH text
+        // RYSOWANIE DYNAMICZNYCH STRZAŁEK NAPROWADZAJĄCYCH NAD PRZYCISKAMI INTERFEJSU MOBILNEGO
+        const drawButtonArrow = (targetX: number) => {
+            ctx.save();
+            const btnBounceY = Math.sin(now * 0.01) * 6; // Szybki, rzucający się w oczy bounce
+            ctx.translate(targetX, GAME_HEIGHT - 120 + btnBounceY); // Pozycja idealnie nad ramkami przycisków
+
+            ctx.beginPath();
+            ctx.moveTo(-10, -25); ctx.lineTo(-10, 0);
+            ctx.lineTo(-20, 0);   ctx.lineTo(0, 18); ctx.lineTo(20, 0);
+            ctx.lineTo(10, 0);    ctx.lineTo(10, -25);
+            ctx.closePath();
+
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.lineWidth = 5;
+            ctx.lineJoin = 'round';
+            ctx.stroke();
+            ctx.fillStyle = '#AF5BF4'; // Fiolet gry
+            ctx.fill();
+            ctx.restore();
+        };
+
+// 1. Jeśli trwa klincz (Scrum) – strzałka pokazuje się TYLKO nad tym buttonem, który trzeba aktualnie kliknąć!
+        if (world.subState === GameSubState.SCRUM_MATRIX) {
+            if (world.scrumPrompt === 'PUSH') {
+                drawButtonArrow(86);               // Pokazuje strzałkę wyłącznie nad PUSH (lewy róg)
+            } else if (world.scrumPrompt === 'HOLD') {
+                drawButtonArrow(GAME_WIDTH - 86);  // Pokazuje strzałkę wyłącznie nad HOLD (prawy róg)
+            }
+        }
+        // 2. Jeśli gracz wykonuje rzut wolny (Kick) – pokazujemy strzałkę wyłącznie nad przyciskiem KICK (prawy dół)
+        if (world.isExtraPointAttempt && world.subState === GameSubState.KICKING && world.player.role === PlayerRole.ATTACKER) {
+            drawButtonArrow(GAME_WIDTH - 86);  // Nad przyciskiem KICK
+        }
 
         ctx.restore();
     }
-    
-    drawTrail(player: PhysicalBody, dir: number, skinColor: string, shirtColor: string, img: HTMLImageElement | undefined, hasOptimalMomentum: boolean, isTackling: boolean) {
+drawTrail(player: PhysicalBody, dir: number, skinColor: string, shirtColor: string, img: HTMLImageElement | undefined, hasOptimalMomentum: boolean, isTackling: boolean) {
         if (!hasOptimalMomentum && !isTackling) return;
 
         const ctx = this.ctx;
@@ -720,9 +836,10 @@ if (world.acquiredMessage) {
         
         ctx.globalCompositeOperation = 'lighter';
         
-// INTENSYWNIEJSZE SMUGI: Zwiększono liczbę linii (z 4 na 6 przy zwykłym sprincie), tworząc znacznie gęstszy ogon komety
+        // Pokrętło 1: GĘSTOŚĆ (liczba poziomych linii na zawodnika)
         const lines = isTackling ? 8 : 6;
-        const trailLen = isTackling ? 100 : 50;
+        // Pokrętło 2: DŁUGOŚĆ (jak daleko za graczem ciągnie się ogon w pikselach)
+        const trailLen = isTackling ? 130 : 80;
         const t = Date.now() / 100;
         
         for (let i = 0; i < lines; i++) {
@@ -730,13 +847,13 @@ if (world.acquiredMessage) {
             const phase = i * 2.5;
             const xWobble = Math.sin(t + phase) * 8;
             
-            // PODBITO WIDOCZNOŚĆ (Alpha): Zwiększono bazową jasność (z 0.3 na 0.5), by smugi były ostre i mocno świeciły na boisku
+            // Pokrętło 3: JASNOŚĆ / MOC NEONU (wartości od 0.0 do 1.0)
             const alpha = 0.5 + Math.sin(t * 1.5 + phase) * 0.3;
             
             ctx.globalAlpha = alpha;
             ctx.beginPath();
             
-            // POGRUBIONO LINIE: Zwiększono grubość pędzla (z 2px na 4px dla sprintu), dzięki czemu smuga zyskuje potężną głębię
+            // Pokrętło 4: GRUBOŚĆ (szerokość pojedynczej linii smugi)
             ctx.lineWidth = isTackling ? 6 : 4;
             ctx.lineCap = 'round';
             
