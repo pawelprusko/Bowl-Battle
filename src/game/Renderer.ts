@@ -46,7 +46,7 @@ export class Renderer {
         this.drawStadiumBackground(); // We will implement this
         
         // Helper to draw Headball stylized player
-        const drawHeadballPlayer = (
+const drawHeadballPlayer = (
             x: number, y: number, w: number, h: number, 
             primaryColor: string, skinColor: string, 
             stunTimer: number, isDebuff: boolean, 
@@ -60,6 +60,11 @@ export class Renderer {
             
             const scale = w / 40; // Base width was 40
             const isStunned = stunTimer > 0;
+            
+            // POPRAWKA BEZPIECZEŃSTWA TS: Przenosimy wyliczenie kierunku na samą górę, 
+            // dzięki czemu bodyRot widzi zmienną faceDir bez wywoływania błędów kompilacji!
+            const faceDir = dirX !== 0 ? dirX : 1;
+
             let cx = x + w/2;
             let cy = y + h;
             
@@ -68,11 +73,17 @@ export class Renderer {
             
             let bodyRot = 0;
             if (knockbackTimer > 0) {
-                let progress = 1.0 - (knockbackTimer / 0.4);
-                let rot = (Math.PI/2) * progress;
-                bodyRot = (velX < 0 ? -rot : rot) * (dirX >= 0 ? 1 : -1);
+                // POPRAWKA MATEMATYCZNA: Dynamicznie dopasowujemy maksymalny czas trwania upadku.
+                const maxDuration = world.scrumSpecialSlowMoTimer > 0 ? 0.6 : 0.4;
+                let progress = 1.0 - (knockbackTimer / maxDuration);
+                if (progress < 0) progress = 0;
+                if (progress > 1) progress = 1;
+
+                let rot = (Math.PI / 2) * progress; 
+                bodyRot = (velX < 0 ? -rot : rot) * (faceDir >= 0 ? 1 : -1);
                 ctx.rotate(bodyRot);
-                ctx.translate(0, -35 * Math.min(1, progress * 3)); 
+                
+                ctx.translate(0, -5 * progress); 
             } else if (isStunned) {
                 // Animate get up in the last 0.3 seconds
                 let rot = Math.PI/2;
@@ -103,7 +114,6 @@ export class Renderer {
             const idleCycle = isRunning ? 0 : now * 0.003;
             
             const bounceY = isRunning && !isTackling ? Math.abs(Math.sin(runCycle)) * 12 : Math.sin(idleCycle) * 3;
-            const faceDir = dirX !== 0 ? dirX : 1;
             
             const headS = 45; 
             const torsoW = 35;
@@ -464,9 +474,91 @@ const ballImg = getImage('sprites.ball');
             ctx.fillText("TACKLE", world.bot.pos.x + world.bot.size.x/2, world.bot.pos.y - 20);
         }
 
-        // --- END CAMERA TRANSFORM ---
+    // --- END CAMERA TRANSFORM ---
         ctx.restore();
         
+// ========================================================================
+        // POPRAWKA: KINOWY GRADIENT PIONOWY Z SYMETRYCZNYM WSUWANIEM I WYSUWANIEM (In/Out Smooth Transitions)
+        // Współczynnik combinedFactor eliminuje nagły przeskok, płynnie renderując efekty przez pierwsze i ostatnie 150ms!
+        // ========================================================================
+        if (world.subState === GameSubState.SCRUM_MATRIX && world.scrumSpecialSlowMoTimer > 0) {
+            ctx.save();
+            
+            // Obliczanie płynnego wejścia (od 0.75 do 0.60) oraz płynnego wyjścia (od 0.15 do 0.0)
+            const totalDuration = 0.75;
+            const transitionTime = 0.15;
+            const entryFactor = Math.min(1, (totalDuration - world.scrumSpecialSlowMoTimer) / transitionTime);
+            const exitFactor = Math.min(1, world.scrumSpecialSlowMoTimer / transitionTime);
+            const combinedFactor = Math.max(0, Math.min(entryFactor, exitFactor));
+
+            // 1. Definiujemy potężny liniowy gradient pionowy z płynną animacją przezroczystości (alpha-fade)
+            const linearGrad = ctx.createLinearGradient(0, 0, 0, GAME_HEIGHT);
+            linearGrad.addColorStop(0, `rgba(12, 4, 28, ${0.96 * combinedFactor})`);       
+            linearGrad.addColorStop(0.20, `rgba(168, 85, 247, ${0.42 * combinedFactor})`);  
+            linearGrad.addColorStop(0.38, 'rgba(0, 0, 0, 0)');          
+            linearGrad.addColorStop(0.62, 'rgba(0, 0, 0, 0)');          
+            linearGrad.addColorStop(0.80, `rgba(168, 85, 247, ${0.42 * combinedFactor})`);  
+            linearGrad.addColorStop(1, `rgba(12, 4, 28, ${0.96 * combinedFactor})`);       
+            
+            ctx.fillStyle = linearGrad;
+            ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
+            // 2. Płynnie wsuwające i wysuwające się panoramiczne pasy filmowe (Ultra-Letterbox)
+            const barHeight = 55 * combinedFactor;
+            ctx.fillStyle = '#05020d';
+            ctx.fillRect(0, 0, GAME_WIDTH, barHeight);
+            ctx.fillRect(0, GAME_HEIGHT - barHeight, GAME_WIDTH, barHeight);
+
+            // 3. NOWOŚĆ: Nieustannie płynące, poziome paski prędkości (Continuous Laser Streaks)
+            ctx.globalCompositeOperation = 'lighter';
+            const lineCount = 6;
+            for (let i = 0; i < lineCount; i++) {
+                // Rozmieszczamy paski na zdefiniowanych wysokościach wewnątrz wolnego kadru gry
+                const y = barHeight + 25 + (i * (GAME_HEIGHT - barHeight * 2 - 50) / (lineCount - 1));
+                const direction = (i % 2 === 0) ? 1 : -1;
+                const speedMultiplier = 3.2 + (i % 3) * 1.5;
+                const segmentLen = 160 + (i * 45) % 140;
+                
+                // Obliczanie płynnego ruchu przewijania smug z krawędzi do krawędzi ekranu
+                let x = (now * speedMultiplier * direction) % (GAME_WIDTH + segmentLen * 2);
+                if (direction === -1) {
+                    x = GAME_WIDTH + segmentLen - ((now * speedMultiplier) % (GAME_WIDTH + segmentLen * 2));
+                } else {
+                    x = x - segmentLen;
+                }
+
+                // Tworzenie neonowego, zanikającego na końcach gradientowego paska prędkości
+                const streakGrad = ctx.createLinearGradient(x, y, x + segmentLen, y);
+                streakGrad.addColorStop(0, 'rgba(255, 255, 255, 0)');
+                streakGrad.addColorStop(0.5, 'rgba(238, 214, 255, 0.85)'); // Jasny fioletowy błysk w środku linii
+                streakGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+                ctx.strokeStyle = streakGrad;
+                ctx.lineWidth = 1.5 + (i % 2); // Zróżnicowana grubość pasów 1.5px lub 2.5px
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+                ctx.lineTo(x + segmentLen, y);
+                ctx.stroke();
+            }
+
+            // 4. NOWOŚĆ: Szybkie, migające losowo paski tła (Transient Anime Jitter) potęgujące agresywny charakter ataku
+            const jitterSeed = Math.floor(now / 45); // Zmiana pozycji co 45ms dla efektu "szorstkiego" migania
+            for (let j = 0; j < 3; j++) {
+                const jitterY = barHeight + 15 + ((jitterSeed * (j + 13) * 97) % (GAME_HEIGHT - barHeight * 2 - 30));
+                const jitterX = (jitterSeed * (j + 7) * 53) % (GAME_WIDTH - 220);
+                const jitterW = 90 + ((jitterSeed + j) % 3) * 60;
+                
+                ctx.strokeStyle = `rgba(255, 255, 255, ${0.25 + (j % 2) * 0.15})`;
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(jitterX, jitterY);
+                ctx.lineTo(jitterX + jitterW, jitterY);
+                ctx.stroke();
+            }
+
+            ctx.restore();
+        }
+
         // --- BEGIN FIXED ON-SCREEN HUD ---
         ctx.save();
         
@@ -518,19 +610,128 @@ const drawStylishText = (text: string, x: number, y: number, fontSize: number, g
             ctx.restore();
         };
 
-        const fioletColors = ['#d8b4fe', '#a855f7', '#7e22ce', '#3b0764'];
+const fioletColors = ['#d8b4fe', '#a855f7', '#7e22ce', '#3b0764'];
 
-// Draw Scrum PUSH/HOLD Prompts
+// Draw Scrum PUSH/HOLD Prompts & Special Attack Overrides
         if (world.subState === GameSubState.SCRUM_MATRIX) {
-            if (world.scrumPrompt) {
-                 const scale = 1.0 + Math.sin(now / 180) * 0.05; // same bounce as "GO!"
+            // POPRAWKA UX: Jeśli trwa uderzenie specjalne lub odliczanie tekstu, w to samo miejsce
+            // (identyczna skala, pozycja i czcionka) wchodzi soczysty napis SPECIAL ATTACK!
+            if (world.scrumSpecialTextTimer > 0 || world.scrumSpecialSlowMoTimer > 0) {
+                 const scale = 1.1 + Math.sin(now / 100) * 0.06; // Ekstra dynamiczny bounce dla atutu
                  ctx.save();
-                 ctx.translate(GAME_WIDTH/2, 160); // slightly lower
+                 ctx.translate(GAME_WIDTH / 2, 160);
                  ctx.scale(scale, scale);
-                 // POPRAWKA: Dodano słowo "PRESS ", dzięki czemu gracz widzi komunikat "PRESS PUSH!" lub "PRESS HOLD!"
+                 drawStylishText("SPECIAL ATTACK!", 0, 0, 35, fioletColors); 
+                 ctx.restore();
+            } else if (world.scrumPrompt) {
+                 const scale = 1.0 + Math.sin(now / 180) * 0.05; // Standardowy bounce
+                 ctx.save();
+                 ctx.translate(GAME_WIDTH / 2, 160);
+                 ctx.scale(scale, scale);
                  drawStylishText("PRESS " + world.scrumPrompt + "!", 0, 0, 35, fioletColors); 
                  ctx.restore();
             }
+
+      // ========================================================================
+            // REWOLUCJA: ULTRA-PŁYNNY SZKLANY PASEK Z EFEKTEM SPRĘŻYNOWANIA (Frosted Glass Blur UI)
+            // Podpięto pod macierz transformacji fizycznych sprężyn harmonicznych i wahadła ze świata gry
+            // ========================================================================
+            ctx.save();
+            const barW = 340; 
+            const barH = 24;  
+            const barX = GAME_WIDTH / 2 - barW / 2;
+            const barY = GAME_HEIGHT - 48 - barH / 2; 
+
+            // PRZENIESIENIE ŚRODKA UKŁADU DLA IDEALNEGO WAHADŁA PENDULUM
+            ctx.translate(barX + barW / 2, barY + barH / 2);
+            ctx.rotate(world.scrumBarBounceAngle); // Obrót fizyczny paska
+            // Elastyczne kurczenie i rozciąganie (Squash & Stretch sprężyny pionowej)
+            ctx.scale(1.0 + world.scrumBarBounceY * 0.0018, 1.0 - world.scrumBarBounceY * 0.0012);
+            ctx.translate(-(barX + barW / 2), -(barY + barH / 2));
+
+            // Potężny neonowy cień pod spodem ramy (Identyczny z oryginalnym Splash Screenem)
+            ctx.shadowColor = world.scrumBarErrorTimer > 0 ? 'rgba(239, 68, 68, 0.6)' : 'rgba(168, 85, 247, 0.55)';
+            ctx.shadowBlur = world.scrumBarErrorTimer > 0 ? 22 : 18;
+
+            // RYSOWANIE CONTRU Z EFEKTEM GLASS BLUR (Mleczno-kryształowa powłoka na pustej strefie)
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.11)'; // Jasna, mleczna baza szkła
+            ctx.strokeStyle = '#FFFFFF';                // border-2 border-white
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.roundRect(barX, barY, barW, barH, 8);
+            ctx.fill();
+            
+            // Druga warstwa dająca głębię szklanego neonu
+            ctx.fillStyle = 'rgba(168, 85, 247, 0.18)';
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.shadowColor = 'transparent'; // Reset cieni dla rysowania postępu
+            ctx.shadowBlur = 0;
+
+            // Przycięcie (Maskowanie zaokrąglonych krawędzi dla płynnego postępu)
+            ctx.save();
+            ctx.beginPath();
+            ctx.roundRect(barX, barY, barW, barH, 8);
+            ctx.clip();
+
+            // WYPELNIENIE: Wybór koloru (Alarmowy czerwony przy błędzie lub głęboki fiolet-950 ładowania)
+            const filledWidth = barW * world.scrumVisualProgress;
+            if (world.scrumBarErrorTimer > 0) {
+                ctx.fillStyle = '#ef4444'; // Soczysty czerwony kolor kary
+                ctx.fillRect(barX, barY, filledWidth, barH);
+            } else {
+                ctx.fillStyle = '#3b0764'; // Klasyczny fiolet-950 z loadera
+                ctx.fillRect(barX, barY, filledWidth, barH);
+
+                // NOWOŚĆ: ŻYJĄCA I FALUJĄCA ENERGIA (Animated Fluid Wave Overlay)
+                // Dodaje płynną, jaśniejszą warstwę mikro-fal, która porusza się w czasie rzeczywistym
+                ctx.fillStyle = 'rgba(168, 85, 247, 0.28)';
+                const waveWobble = Math.sin(now * 0.006) * 6; // Delikatne horyzontalne falowanie energii
+                ctx.fillRect(barX, barY, Math.min(filledWidth, filledWidth + waveWobble), barH);
+            }
+
+            // BIEŻĄCY BIAŁY BŁYSK PŁOMIENI WEWNĘTRZNYCH
+            if (world.scrumSpecialFlashTimer > 0) {
+                ctx.fillStyle = `rgba(255, 255, 255, ${world.scrumSpecialFlashTimer})`;
+                ctx.fillRect(barX, barY, barW, barH);
+            }
+            ctx.restore(); // Wyjście z przycięcia maski ramy
+
+            // ZEWNĘTRZNA FALA UDERZENIOWA (Shockwave Ring) przy 100% energii
+            if (world.scrumSpecialFlashTimer > 0) {
+                ctx.save();
+                ctx.strokeStyle = `rgba(255, 255, 255, ${world.scrumSpecialFlashTimer})`;
+                ctx.lineWidth = 4 * world.scrumSpecialFlashTimer;
+                ctx.shadowColor = '#FFFFFF';
+                ctx.shadowBlur = 22 * world.scrumSpecialFlashTimer;
+                ctx.beginPath();
+                const expansion = (1.0 - world.scrumSpecialFlashTimer) * 7;
+                ctx.roundRect(barX - expansion, barY - expansion, barW + expansion * 2, barH + expansion * 2, 8);
+                ctx.stroke();
+                ctx.restore();
+            }
+
+            // WEKTOROWA IKONA ZŁOTEJ BŁYSKAWICY
+            const centerX = GAME_WIDTH / 2;
+            ctx.fillStyle = world.scrumBarErrorTimer > 0 ? '#FFFFFF' : '#FBBF24'; // Błyskawica bieleje w stanie błędu
+            ctx.beginPath();
+            ctx.moveTo(centerX - 72, barY + 5);
+            ctx.lineTo(centerX - 81, barY + 13);
+            ctx.lineTo(centerX - 76, barY + 13);
+            ctx.lineTo(centerX - 79, barY + 19);
+            ctx.lineTo(centerX - 68, barY + 11);
+            ctx.lineTo(centerX - 73, barY + 11);
+            ctx.closePath();
+            ctx.fill();
+
+            // TEKST LOGISTYCZNY PASKA (Zwiększona stabilność typograficzna)
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = 'bold 12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText("SPECIAL ATTACK", centerX + 4, barY + barH / 2);
+            ctx.restore();
         }
         
 if (world.acquiredMessage) {
@@ -814,21 +1015,22 @@ ctx.shadowColor = 'transparent'; // Remove shadow for fill
         };
 
 // 1. Jeśli trwa klincz (Scrum) – strzałka pokazuje się TYLKO nad tym buttonem, który trzeba aktualnie kliknąć!
-        if (world.subState === GameSubState.SCRUM_MATRIX) {
+        // POPRAWKA UX: Strzałki nawigacyjne zostają całkowicie wyłączone i schowane w trakcie trwania widowiskowego Special Attack slow-motion!
+        if (world.subState === GameSubState.SCRUM_MATRIX && world.scrumSpecialSlowMoTimer <= 0 && world.scrumSpecialTextTimer <= 0) {
             if (world.scrumPrompt === 'PUSH') {
-                drawButtonArrow(86);               // Pokazuje strzałkę wyłącznie nad PUSH (lewy róg)
+                drawButtonArrow(94);               // Pokazuje strzałkę wyłącznie nad PUSH (lewy róg)
             } else if (world.scrumPrompt === 'HOLD') {
-                drawButtonArrow(GAME_WIDTH - 86);  // Pokazuje strzałkę wyłącznie nad HOLD (prawy róg)
+                drawButtonArrow(GAME_WIDTH - 94);  // Pokazuje strzałkę wyłącznie nad HOLD (prawy róg)
             }
         }
         // 2. Jeśli gracz wykonuje rzut wolny (Kick) – pokazujemy strzałkę wyłącznie nad przyciskiem KICK (prawy dół)
         if (world.isExtraPointAttempt && world.subState === GameSubState.KICKING && world.player.role === PlayerRole.ATTACKER) {
-            drawButtonArrow(GAME_WIDTH - 86);  // Nad przyciskiem KICK
+            drawButtonArrow(GAME_WIDTH - 94);  // Nad przyciskiem KICK
         }
 
         ctx.restore();
     }
-drawTrail(player: PhysicalBody, dir: number, skinColor: string, shirtColor: string, img: HTMLImageElement | undefined, hasOptimalMomentum: boolean, isTackling: boolean) {
+drawTrail(player: Player, dir: number, skinColor: string, shirtColor: string, img: HTMLImageElement | undefined, hasOptimalMomentum: boolean, isTackling: boolean) {
         if (!hasOptimalMomentum && !isTackling) return;
 
         const ctx = this.ctx;
@@ -836,10 +1038,13 @@ drawTrail(player: PhysicalBody, dir: number, skinColor: string, shirtColor: stri
         
         ctx.globalCompositeOperation = 'lighter';
         
-        // Pokrętło 1: GĘSTOŚĆ (liczba poziomych linii na zawodnika)
-        const lines = isTackling ? 8 : 6;
-        // Pokrętło 2: DŁUGOŚĆ (jak daleko za graczem ciągnie się ogon w pikselach)
-        const trailLen = isTackling ? 130 : 80;
+        // POPRAWKA: Sprawdzamy czy aktualnie trwa kinowy pokaz szarży specjalnej gracza
+        const isSpecialAttackActive = hasOptimalMomentum && player.scrumPushTimer > 0.4;
+
+        // POPRAWKA WIZUALNA: Jeśli trwa Special Attack, zagęszczamy linie (aż 12!), wydłużamy ogon do kolosalnych 260px 
+        // oraz drastycznie zwiększamy grubość pasów (16px), tworząc niesamowicie potężną, neonową kometę energii!
+        const lines = isSpecialAttackActive ? 12 : (isTackling ? 8 : 6);
+        const trailLen = isSpecialAttackActive ? 260 : (isTackling ? 130 : 80);
         const t = Date.now() / 100;
         
         for (let i = 0; i < lines; i++) {
@@ -847,14 +1052,12 @@ drawTrail(player: PhysicalBody, dir: number, skinColor: string, shirtColor: stri
             const phase = i * 2.5;
             const xWobble = Math.sin(t + phase) * 8;
             
-            // Pokrętło 3: JASNOŚĆ / MOC NEONU (wartości od 0.0 do 1.0)
-            const alpha = 0.5 + Math.sin(t * 1.5 + phase) * 0.3;
+            const alpha = isSpecialAttackActive ? 0.85 : (0.5 + Math.sin(t * 1.5 + phase) * 0.3);
             
             ctx.globalAlpha = alpha;
             ctx.beginPath();
             
-            // Pokrętło 4: GRUBOŚĆ (szerokość pojedynczej linii smugi)
-            ctx.lineWidth = isTackling ? 6 : 4;
+            ctx.lineWidth = isSpecialAttackActive ? 16 : (isTackling ? 6 : 4);
             ctx.lineCap = 'round';
             
             const startX = player.pos.x + (dir > 0 ? 0 : player.size.x) - (dir * xWobble);

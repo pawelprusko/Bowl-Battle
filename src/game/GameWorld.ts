@@ -347,9 +347,23 @@ isExtraPointAttempt = false;
 freeBallTimer = 0;
     showRunArrow = false; // Flaga dla renderera informująca o rysowaniu strzałki touchdownu
     showPlayerArrow = false; // Flaga dla strzałki wskazującej gracza na samym początku meczu
-    scrumSlowMoTimer = 0; // Licznik kontrolujący kinowe, widowiskowe spowolnienie czasu na finiszu walki
+scrumSlowMoTimer = 0; // Licznik kontrolujący kinowe, widowiskowe spowolnienie czasu na finiszu walki
     pendingRunArrow = false; // Nowa flaga oczekiwania na zakończenie slow-motion przed pokazaniem strzałki TD
     kickInputLockout = 0;    // Absolutna blokada chroniąca przed accidental-touch, ghost-clickami lub hoverem z UI
+  scrumComboCount = 0;          // Licznik udanych kliknięć z rzędu pod Special Attack (0 do 5)
+    scrumSpecialFlashTimer = 0;   // Timer rozbłysku białych płomieni na pasku Special Attack
+scrumSpecialTextTimer = 0;    // Timer wyświetlania wielkiego napisu SPECIAL! na środku ekranu
+    scrumSpecialSlowMoTimer = 0;  // NOWOŚĆ: Licznik slow-motion dedykowany dla wybuchowego momentu Special Attack
+   scrumTargetOffset = 0;        // NOWOŚĆ: Cel do którego postacie płynnie zmierzają (eliminuje szarpanie i skoki)
+    isSpecialAttackWinning = false; // Flaga zabezpieczająca płynne przejście finału szarży specjalnej
+    
+    // NOWOŚĆ: Zaawansowane zmienne fizyczne i sprężynowe dla elastycznego paska Special Attack
+    scrumVisualProgress = 0.1;    // Płynny wskaźnik postępu (zaczyna od bazowych 10%)
+    scrumBarBounceY = 0;          // Amplituda sprężynowania pionowego (kompresja)
+    scrumBarBounceVelY = 0;       // Prędkość sprężynowania pionowego
+    scrumBarBounceAngle = 0;      // Kąt wychylenia wahadłowego (pendulum wobble)
+    scrumBarBounceVelAngle = 0;   // Prędkość kątowa wahadła
+    scrumBarErrorTimer = 0;       // Czas trwania alarmowej czerwieni paska po błędzie
 
     celebrationTimeoutId: any = null;
 
@@ -359,6 +373,17 @@ freeBallTimer = 0;
     }
     
     resetToSnap() {
+        this.scrumVisualProgress = 0.1;
+this.scrumBarBounceY = 0;
+this.scrumBarBounceVelY = 0;
+this.scrumBarBounceAngle = 0;
+this.scrumBarBounceVelAngle = 0;
+this.scrumBarErrorTimer = 0;
+        this.isSpecialAttackWinning = false;
+        this.scrumSpecialSlowMoTimer = 0;
+        this.scrumComboCount = 0;
+this.scrumSpecialFlashTimer = 0;
+this.scrumSpecialTextTimer = 0;
         this.acquiredMessage = null;
         this.botAvoidTimer = 0;
         if (this.celebrationTimeoutId) {
@@ -431,6 +456,76 @@ this.isExtraPointAttempt = false;
     }
     
 update(dt: number) {
+        const realDt = dt; // Zapisujemy czysty, rzeczywisty upływ sekundy przed jakimkolwiek spowolnieniem
+// POPRAWKA CZASU I WSTAWANIA: Wydłużono czas szarży do 0.75s, aby bot w pełni wylądował, eliminując bezczynne leżenie na trawie!
+        if (this.scrumSpecialSlowMoTimer > 0) {
+            this.scrumSpecialSlowMoTimer -= dt; 
+            
+            this.player.scrumPushTimer = this.scrumSpecialSlowMoTimer;
+            this.bot.knockbackTimer = this.scrumSpecialSlowMoTimer;
+            this.bot.isWaitingForScrumRecovery = true; 
+
+            if (this.scrumSpecialSlowMoTimer <= 0) {
+                this.scrumSpecialSlowMoTimer = 0;
+                this.scrumSpecialTextTimer = 0;
+                
+                // POPRAWKA FINISZU: Inteligentna weryfikacja roli zawodnika przed aktywacją strzałki naprowadzającej TD
+                if (this.isSpecialAttackWinning) {
+                    this.isSpecialAttackWinning = false;
+                    const isPlayerAttacker = this.player.role === PlayerRole.ATTACKER;
+                    
+                    this.resolveScrumWinner(true); // Oficjalne zwycięstwo gracza w minigrze QTE
+                    this.scrumSlowMoTimer = 0;     // Zerujemy standardowe slow-mo finiszu, aby od razu wyjść do zoom-outu
+                    
+                    if (isPlayerAttacker) {
+                        this.bot.knockbackTimer = 0;
+                        this.bot.isWaitingForScrumRecovery = true; // Bot zostaje powalony na ziemi
+                        this.showRunArrow = true;                  // Włączamy strzałkę biegu TYLKO jeśli gracz był Atakującym!
+                    } else {
+                        this.showRunArrow = false;                 // Jeśli gracz bronił – brak strzałki TD, zbieramy wolną piłkę z powietrza
+                    }
+                    this.pendingRunArrow = false;
+                } else {
+                    // POPRAWKA UX: Efekty znikają dokładnie w momencie uderzenia bota o ziemię, a on od razu płynnie wstaje (animacja 0.3s)!
+                    this.bot.stunTimer = 0.3; 
+                    this.bot.isWaitingForScrumRecovery = false;
+                    this.bot.knockbackTimer = 0;
+                }
+            }
+            dt *= 0.20; 
+        }
+// Odliczanie timerów HUD w czasie rzeczywistym
+        if (this.scrumSpecialTextTimer > 0 && this.scrumSpecialSlowMoTimer <= 0) this.scrumSpecialTextTimer -= realDt;
+        if (this.scrumSpecialFlashTimer > 0) this.scrumSpecialFlashTimer -= realDt;
+
+        // ========================================================================
+        // NOWOŚĆ: AKTUALIZACJA SPRĘŻYNOWANIA I PŁYNNEGO POSTĘPU PASKA SPECIAL ATTACK
+        // ========================================================================
+        let targetProgress = 0.1 + (this.scrumComboCount / 5) * 0.9; // Skalowanie 10% - 100%
+        if (this.scrumSpecialSlowMoTimer > 0) {
+            targetProgress = 1.0; // Trzymaj pełny stan podczas szarży specjalnej
+        }
+        if (this.scrumBarErrorTimer > 0) {
+            this.scrumBarErrorTimer -= realDt;
+            targetProgress = 0.1; // Dąż do bazy 10% podczas kary
+        }
+        // Płynna, organiczna interpolacja postępu
+        this.scrumVisualProgress += (targetProgress - this.scrumVisualProgress) * realDt * 7.5;
+
+        // 1. Fizyka wahadła (Tłumione drgania obrotowe paska)
+        const kAngle = 190; // Sztywność sprężyny wahadła
+        const dAngle = 11;  // Współczynnik tłumienia drgań
+        const accAngle = -kAngle * this.scrumBarBounceAngle - dAngle * this.scrumBarBounceVelAngle;
+        this.scrumBarBounceVelAngle += accAngle * realDt;
+        this.scrumBarBounceAngle += this.scrumBarBounceVelAngle * realDt;
+
+        // 2. Fizyka kompresji pionowej (Elastyczny skok góra/dół)
+        const kY = 170;     // Sztywność pionowa
+        const dY = 13;      // Tłumienie pionowe
+        const accY = -kY * this.scrumBarBounceY - dY * this.scrumBarBounceVelY;
+        this.scrumBarBounceVelY += accY * realDt;
+        this.scrumBarBounceY += this.scrumBarBounceVelY * realDt;
+
         // FINAŁOWE SLOW MOTION: Jeśli walka w klinczu właśnie się zakończyła,
         // drastycznie spowolniamy upływ czasu (ok. 8-krotnie), aby pokazać epickie uderzenie i bezwładny upadek postaci.
         if (this.scrumSlowMoTimer > 0) {
@@ -472,7 +567,7 @@ update(dt: number) {
             if (this.bigTackleTimer < 0) this.bigTackleTimer = 0;
         }
 
-// Particle update
+        // Particle update
         for (let i = this.particles.length - 1; i >= 0; i--) {
             const p = this.particles[i];
             p.life -= dt;
@@ -504,10 +599,10 @@ update(dt: number) {
             this.fumbleProtectTimer -= dt;
         }
 
-     if (this.subState === GameSubState.COUNTDOWN) {
+        if (this.subState === GameSubState.COUNTDOWN) {
             this.countdownTimer -= dt;
             this.ball.updatePhysics(dt, [this.player, this.bot]);
-if (this.countdownTimer <= 0) {
+            if (this.countdownTimer <= 0) {
                 this.showPlayerArrow = false; // Strzałka nad graczem znika bezpowrotnie w ułamku sekundy wystrzału piłki
                 playSFX('kickoff');
                 this.subState = GameSubState.KICKOFF_LAUNCH;
@@ -555,7 +650,7 @@ if (this.countdownTimer <= 0) {
                  this.bot.vel.x = 0;
                  this.freeBallTimer += dt;
                  
-     if (this.freeBallTimer > 1.0) {
+                 if (this.freeBallTimer > 1.0) {
                      this.subState = GameSubState.REGULAR;
                      this.player.isRetreating = false;
                      this.bot.isRetreating = false;
@@ -598,18 +693,19 @@ if (this.countdownTimer <= 0) {
         this.player.update(dt);
         this.bot.update(dt);
         
-        // Determine facing directions
+// Determine facing directions
         if (this.subState === GameSubState.REGULAR || this.subState === GameSubState.KICKING || this.subState === GameSubState.COUNTDOWN || this.subState === GameSubState.CELEBRATION || this.subState === GameSubState.BALL_ACQUIRED || this.subState === GameSubState.SCRUM_MATRIX || this.subState === GameSubState.FREE_BALL) {
             
             // Attacker always faces their goal. Defender always faces attacker.
             if (this.player.role === PlayerRole.ATTACKER) {
                 if (this.player.stunTimer <= 0 && !this.player.isWaitingForScrumRecovery && (!this.player.isRetreating || this.player.isAtRetreatPos)) {
-                    this.player.facingX = 1; // P1 goal is right
+                    // POPRAWKA: Jeśli gracz wygrał klincz i zawraca (biegnie w lewo), obracamy jego grafikę zgodnie z wcisków klawiszy!
+                    this.player.facingX = this.player.dirX !== 0 ? this.player.dirX : 1; 
                 }
                 if (this.bot.stunTimer <= 0 && !this.bot.isWaitingForScrumRecovery && (!this.bot.isRetreating || this.bot.isAtRetreatPos)) {
                     this.bot.facingX = (this.bot.pos.x > this.player.pos.x) ? -1 : 1; 
                 }
-            } else if (this.bot.role === PlayerRole.ATTACKER) {
+} else if (this.bot.role === PlayerRole.ATTACKER) {
                 if (this.bot.stunTimer <= 0 && !this.bot.isWaitingForScrumRecovery && (!this.bot.isRetreating || this.bot.isAtRetreatPos)) {
                     this.bot.facingX = -1; // Bot goal is left
                 }
@@ -653,68 +749,69 @@ if (this.countdownTimer <= 0) {
             }
         }
         
-        // No longer automatically trigger scrum here. It's triggered by playerTackle() or bot logic.
-        
-// Handle SCRUM_MATRIX state (Dynamiczna, sportowa walka QTE o wysokiej intensywności)
+        // Handle SCRUM_MATRIX state (Dynamiczna, sportowa walka QTE o wysokiej intensywności)
         if (this.subState === GameSubState.SCRUM_MATRIX) {
             this.scrumTimer += dt;
             
-            // CYKLICZNY POTĘŻNY ATAK BOTA (Wizualny i fizyczny opór przeciwnika co 2.5s)
-            // Bot uderza częściej (co 2.5 sekundy), a siła jego ataku wynosi dokładnie 78,
-            // czyli idealne dwukrotne przeciwieństwo Twojego nowego kroku przesunięcia (39 * 2).
-const lastInterval = Math.floor((this.scrumTimer - dt) / 2.0);
-            const currentInterval = Math.floor(this.scrumTimer / 2.0);
+    // POPRAWKA: Przeciwnik wykonuje teraz potężny atak cyklicznie co 1.2 sekundy (zamiast 2.0s), zwiększając wyzwanie!
+            const lastInterval = Math.floor((this.scrumTimer - dt) / 1.2);
+            const currentInterval = Math.floor(this.scrumTimer / 1.2);
             if (currentInterval > lastInterval && this.scrumTimer > 0.5) {
-                this.scrumOffset -= 72; 
-                this.bot.scrumPushTimer = 0.35; // Aktywacja smug dla bota przy potężnym, cyklicznym tąpnięciu
+                this.scrumTargetOffset -= 80; 
+                this.bot.scrumPushTimer = 0.35; 
                 this.spawnParticles(this.bot.pos.x + this.bot.size.x/2, this.bot.pos.y, 'miss', 15);
                 this.screenShake = 0.4;
                 
-                // MOMENT 3: Agresywny, rzucany puls (160ms wibracji, 60ms pauzy, 100ms wibracji)
-                // Gracz natychmiast wyczuje palcem, że bot przejął inicjatywę i zepchnął go w tył.
                 if (typeof navigator !== 'undefined' && navigator.vibrate) {
                     navigator.vibrate([160, 60, 100]);
                 }
             }
 
-            // Minigame logic
-            this.scrumPromptTimer -= dt;
-            
-            if (this.scrumPrompt === null) {
-                if (this.scrumPromptTimer <= 0) {
-                    this.scrumPrompt = Math.random() > 0.5 ? 'PUSH' : 'HOLD';
-                    this.scrumPromptTimer = 0.48; 
-                    this.scrumBotPressDelay = 0.16 + Math.random() * 0.18; 
-                    this.player.scrumCharging = false; 
-                    this.bot.scrumCharging = false;
-                }
+            // POPRAWKA UX: Podczas trwania szarży Special Attack oraz gdy bot leży powalony na ziemi,
+            // całkowicie wyłączamy i ukrywamy prompty QTE oraz strzałki, dając czas na odtworzenie animacji leżenia i wstawania.
+            if (this.scrumSpecialSlowMoTimer > 0 || this.bot.stunTimer > 0) {
+                this.scrumPrompt = null;
+                this.scrumPromptTimer = 0.2; 
             } else {
-                // Bot podejmuje działanie, jeśli gracz go nie wyprzedził
-                if (!this.bot.scrumCharging && this.scrumPromptTimer <= 0.48 - this.scrumBotPressDelay) {
-                    this.bot.scrumCharging = true;
-                    if (Math.random() > 0.25) { 
-                        this.resolveScrumAction(this.bot, this.scrumPrompt, true);
-                    } else {
-                        this.resolveScrumAction(this.bot, this.scrumPrompt === 'PUSH' ? 'HOLD' : 'PUSH', true);
+                // Minigame logic
+                this.scrumPromptTimer -= dt;
+                if (this.scrumPrompt === null) {
+                    if (this.scrumPromptTimer <= 0) {
+                        this.scrumPrompt = Math.random() > 0.5 ? 'PUSH' : 'HOLD';
+                        this.scrumPromptTimer = 0.48; 
+                        this.scrumBotPressDelay = 0.16 + Math.random() * 0.18; 
+                        this.player.scrumCharging = false; 
+                        this.bot.scrumCharging = false;
                     }
-                }
-                
-                // TIMEOUT / KARA ZA BEZCZYNNOŚĆ
-                if (this.scrumPromptTimer <= 0) {
-                    this.scrumOffset -= 46; // Zwiększono karę za bezczynność o 30% (z 35 na 46)
-                    this.spawnParticles(this.player.pos.x + this.player.size.x/2, this.player.pos.y, 'miss', 5);
-                    this.scrumPrompt = null;
-                    this.scrumPromptTimer = 0.15; 
+                } else {
+                    // Bot podejmuje działanie, jeśli gracz go nie wyprzedził
+                    if (!this.bot.scrumCharging && this.scrumPromptTimer <= 0.48 - this.scrumBotPressDelay) {
+                        this.bot.scrumCharging = true;
+                        if (Math.random() > 0.25) { 
+                            this.resolveScrumAction(this.bot, this.scrumPrompt, true);
+                        } else {
+                            this.resolveScrumAction(this.bot, this.scrumPrompt === 'PUSH' ? 'HOLD' : 'PUSH', true);
+                        }
+                    }
+                    
+                    // TIMEOUT / KARA ZA BEZCZYNNOŚĆ
+                    if (this.scrumPromptTimer <= 0) {
+                        this.scrumTargetOffset -= 46; 
+                        this.spawnParticles(this.player.pos.x + this.player.size.x/2, this.player.pos.y, 'miss', 5);
+                        this.scrumPrompt = null;
+                        this.scrumPromptTimer = 0.15; 
+                    }
                 }
             }
             
+            // ========================================================================
+            // REWOLUCJA: INŻYNIERIA PŁYNNEGO RUCHU (Smooth Linear Interpolation)
+            // ========================================================================
+            const slideVelocity = this.scrumSpecialSlowMoTimer > 0 ? 5.5 : 8.5;
+            this.scrumOffset += (this.scrumTargetOffset - this.scrumOffset) * realDt * slideVelocity;
+
             // Wiggle players and apply offset
             const pushWiggle = Math.sin(this.scrumTimer * 20) * 5;
-            
-            const pCenter = this.player.pos.x + this.player.size.x / 2;
-            const bCenter = this.bot.pos.x + this.bot.size.x / 2;
-            
-            // If player is on left, positive offset means player moves right (pushes bot)
             const playerIsLeft = this.player.pos.x < this.bot.pos.x;
             const actualOffset = playerIsLeft ? this.scrumOffset : -this.scrumOffset;
             
@@ -723,43 +820,49 @@ const lastInterval = Math.floor((this.scrumTimer - dt) / 2.0);
             this.player.pos.x = targetMidX - (playerIsLeft ? this.player.size.x/2 + 15 : -this.player.size.x/2 - 15) + pushWiggle;
             this.bot.pos.x = targetMidX - (!playerIsLeft ? this.bot.size.x/2 + 15 : -this.bot.size.x/2 - 15) - pushWiggle;
             
-            // PRZYWRÓCENIE EMOCJONUJĄCEJ ANIMACJI KLINCZU (Rocking / Headbutting movement)
-            // Przekazujemy dynamicznie zmieniającą się wartość fali sinusoidalnej do vel.x. 
-            // Dzięki temu silnik graficzny w Renderer.ts zacznie gwałtownie i agresywnie przechylać 
-            // torsy, głowy oraz ramiona zawodników naprzemiennie, idealnie oddając walkę w zwarciu!
-            this.player.vel.x = Math.sin(this.scrumTimer * 26) * 50;
-            this.bot.vel.x = -Math.sin(this.scrumTimer * 26) * 50;
+            // POPRAWKA INTERPOLACJI I SYLWETEK: Gdy bot leży lub trwa atut specjalny, wyłączamy drgania struggleWobble
+            // oraz całkowicie zerujemy prędkość podczas leżenia/wstawania, aby updatePhysics nie powodował przeskakiwania pozycji!
+            const isSpecialOrStunned = this.scrumSpecialSlowMoTimer > 0 || this.bot.stunTimer > 0;
+            const struggleWobble = isSpecialOrStunned ? 0 : Math.sin(this.scrumTimer * 28) * 90;
+            this.player.vel.x = ((this.scrumTargetOffset - this.scrumOffset) * slideVelocity) + struggleWobble;
             
-           // Check win condition
-            if (Math.abs(this.scrumOffset) >= this.scrumWinOffset) {
-                const playerWon = this.scrumOffset > 0;
-                this.resolveScrumWinner(playerWon);
+            if (this.scrumSpecialSlowMoTimer > 0) {
+                this.bot.vel.x = 280; // Stabilna dodatnia prędkość w trakcie lotu w tył
+            } else if (this.bot.stunTimer > 0) {
+                this.bot.vel.x = 0;   // POPRAWKA: Trzymamy bota idealnie w punkcie zderzenia bez dryfowania fizyki klatek!
+            } else {
+                this.bot.vel.x = -(this.scrumTargetOffset - this.scrumOffset) * slideVelocity - struggleWobble;
+            }
+            
+            // POPRAWKA: Blokujemy automatyczne, standardowe wywołanie końca klinczu w trakcie trwania Special Attack,
+            // zapobiegając ucinaniu animacji, teleportacji bota oraz niespodziewanemu upuszczaniu piłki na ziemię.
+            if (this.scrumSpecialSlowMoTimer <= 0) {
+                if (Math.abs(this.scrumOffset) >= this.scrumWinOffset) {
+                    const playerWon = this.scrumOffset > 0;
+                    this.resolveScrumWinner(playerWon);
+                }
             }
         } // To zamyka blok SCRUM_MATRIX
         
- // TUTAJ PRZYWRÓCONO BRAKUJĄCE LINIE WARUNKOWE:
         if (this.subState === GameSubState.THE_SNAP || this.subState === GameSubState.FREE_BALL || this.subState === GameSubState.KICKOFF_LAUNCH) {
             if (this.subState === GameSubState.KICKOFF_LAUNCH) {
                 this.ballOscillatePhase += dt * 4.0;
-                this.ball.updatePhysics(dt, [this.player, this.bot]); // grawitacja działa
+                this.ball.updatePhysics(dt, [this.player, this.bot]); 
                 
-                // Dynamiczne i w pełni losowe nakładanie fal przy każdym nowym kickoffie!
                 let chaoticX = this.ballOscillateCenter 
                     + Math.sin(this.ballOscillatePhase) * (GAME_WIDTH * 0.25) * this.kickoffAmps[0]
                     + Math.sin(this.ballOscillatePhase * this.kickoffFreqs[0]) * (GAME_WIDTH * 0.15) * this.kickoffAmps[1]
                     + Math.sin(this.ballOscillatePhase * this.kickoffFreqs[1]) * (GAME_WIDTH * 0.1) * this.kickoffAmps[2];
                 
-// Przywrócenie pełnego, widowiskowego toru lotu od krawędzi do krawędzi ekranu (od 0 do GAME_WIDTH)
                 this.ball.pos.x = Math.max(0, Math.min(GAME_WIDTH - this.ball.size.x, chaoticX));
                 
                 if (this.ball.pos.y >= GROUND_Y - this.ball.size.y) {
                     this.freeBallTimer = 0;
-                    this.subState = GameSubState.FREE_BALL; // bounces
-                    this.fumbleProtectTimer = 0.35; // Krótka ochrona 0.35s po zderzeniu z ziemią, by dać piłce czas na odskoczenie
+                    this.subState = GameSubState.FREE_BALL; 
+                    this.fumbleProtectTimer = 0.35; 
                     this.ball.allowCeilingBounce = true;
-                    this.ball.vel.y = -675; // force a strong first bounce up
+                    this.ball.vel.y = -675; 
                     
-                    // Inteligentne obliczanie odskoku – uciekaj od gracza, który stoi za blisko punktu lądowania
                     let dynamicXShot = (Math.random() - 0.5) * 900;
                     const pDist = Math.abs((this.player.pos.x + this.player.size.x/2) - (this.ball.pos.x + this.ball.size.x/2));
                     const bDist = Math.abs((this.bot.pos.x + this.bot.size.x/2) - (this.ball.pos.x + this.ball.size.x/2));
@@ -778,26 +881,21 @@ const lastInterval = Math.floor((this.scrumTimer - dt) / 2.0);
                     if (this.freeBallTimer > 8.0) {
                         this.ball.bounciness = 0.0;
                     } else {
-                        // Starts at 1.0 (very bouncy/fast) and gradually drops to 0.4 over 8 seconds
                         this.ball.bounciness = 1.0 - (this.freeBallTimer / 8.0) * 0.6;
                     }
                 }
                 this.ball.updatePhysics(dt, [this.player, this.bot]);
             }
             
-// Check ball touch (Blokada przejęcia piłki w locie oraz pod wpływem ochrony fumble)
             const canCatch = this.subState !== GameSubState.KICKOFF_LAUNCH && this.fumbleProtectTimer <= 0;
             const pTouch = canCatch && this.player.stunTimer <= 0 && !this.player.isWaitingForScrumRecovery && this.checkAABB(this.player, this.ball);
             const bTouch = canCatch && this.bot.stunTimer <= 0 && !this.bot.isWaitingForScrumRecovery && this.checkAABB(this.bot, this.ball);
             
             if (pTouch || bTouch) {
-                // If popping / kickoff, possessing the ball resumes REGULAR state.
                 if (this.subState === GameSubState.KICKOFF_LAUNCH) {
                     this.subState = GameSubState.REGULAR;
                 }
-                
                 if (pTouch && bTouch) {
-                    // Tie goes to player for fun
                     this.assignBall(this.player, this.bot);
                 } else if (pTouch) {
                     this.assignBall(this.player, this.bot);
@@ -806,39 +904,32 @@ const lastInterval = Math.floor((this.scrumTimer - dt) / 2.0);
                 }
             }
         } else if (this.subState === GameSubState.REGULAR || this.subState === GameSubState.KICKING || this.subState === GameSubState.BALL_ACQUIRED || this.subState === GameSubState.SCRUM_MATRIX || this.subState === GameSubState.TACKLE_RESOLVE || (this.subState === GameSubState.CELEBRATION && this.celebrationMessage.includes("TOUCHDOWN"))) {
-            // Ball attached to attacker (również podczas celebracji przyłożenia, by nie wypadała z rąk)
             const attacker = this.player.role === PlayerRole.ATTACKER ? this.player : this.bot;
-            const defender = this.player.role === PlayerRole.DEFENDER ? this.player : this.bot;
             
             if (this.isExtraPointAttempt && this.subState === GameSubState.KICKING) {
-                // Ball on the ground for extra point kick
                 this.ball.pos.set(
                     attacker.pos.x + (attacker.facingX > 0 ? attacker.size.x + 5 : -this.ball.size.x - 5),
                     GROUND_Y - this.ball.size.y
                 );
             } else {
-                // Ball at chest/hand height
                 this.ball.pos.set(
                     attacker.pos.x + (attacker.facingX > 0 ? attacker.size.x * 0.6 : -this.ball.size.x * 0.1),
                     attacker.pos.y + 10
                 );
             }
 
-            // Kicking logic
             if (this.isChargingKick) {
                 this.kickHoldTimer += dt;
-                
-                this.kickPower += this.kickDir * dt * (100 / 0.8); // 1.2 sekundy do 100%
+                this.kickPower += this.kickDir * dt * (100 / 0.8); 
                 if (this.kickPower > 100) { 
                     this.kickPower = 100;
-                    this.kickDir = -1; // Bounce back down
+                    this.kickDir = -1; 
                 } else if (this.kickPower < 0) {
                     this.kickPower = 0;
-                    this.kickDir = 1; // Bounce back up
+                    this.kickDir = 1; 
                 }
             }
 
-// Check Endzone (Zabezpieczone przed nieskończoną pętlą punktową podczas celebracji)
             if (this.subState !== GameSubState.CELEBRATION && this.subState !== GameSubState.KICKING) {
                 if (attacker === this.player && attacker.pos.x + attacker.size.x >= GAME_WIDTH - 42) {
                     this.scoreTouchdown(this.player);
@@ -847,14 +938,10 @@ const lastInterval = Math.floor((this.scrumTimer - dt) / 2.0);
                 }
             }
 
-} else if (this.subState === GameSubState.BALL_IN_AIR) {
+        } else if (this.subState === GameSubState.BALL_IN_AIR) {
             this.ball.updatePhysics(dt, [this.player, this.bot]);
             
-            // Stara, zawodna weryfikacja pozycji X/Y słupków została stąd całkowicie usunięta,
-            // ponieważ punkty za udany Extra Point są teraz przyznawane natychmiast i bezbłędnie w releaseKick().
-            
             if (this.ball.pos.y >= GROUND_Y - this.ball.size.y) {
-                // Ball hits ground - fumble if not goal
                 if (this.isExtraPointAttempt) {
                     this.isExtraPointAttempt = false;
                     this.subState = GameSubState.CELEBRATION;
@@ -866,7 +953,6 @@ const lastInterval = Math.floor((this.scrumTimer - dt) / 2.0);
                 }
             }
 
-            // Defender diving block not applicable in fast mode
             const defender = this.player.role === PlayerRole.DEFENDER ? this.player : this.bot;
             if (defender.isDiving && this.checkAABB(defender, this.ball)) {
                 this.ball.vel.x = -this.ball.vel.x;
@@ -887,22 +973,15 @@ const lastInterval = Math.floor((this.scrumTimer - dt) / 2.0);
             }
         }
         
-// Update camera (Zablokowanie kadru na punkcie kolizji, aby pokazać przesuwanie zawodników)
         if (this.subState === GameSubState.SCRUM_MATRIX) {
-            // Zoom in over 0.3 seconds
             const zoomProgress = Math.min(1.0, this.scrumTimer / 0.3);
-            const ease = 1 - Math.pow(1 - zoomProgress, 3); // easeOutCubic
-            
+            const ease = 1 - Math.pow(1 - zoomProgress, 3); 
             const targetScale = 1.25;
             this.cameraZoom = 1.0 + (targetScale - 1.0) * ease;
             
-            // KAMERA KOŃCZY TELEPORTACJĘ NA PUNKCIE ZDERZENIA: Zamiast śledzić dynamiczny ruch, 
-            // aparat celuje sztywno w pierwotny punkt kolizji. Dzięki temu wskaźnik offsetu 
-            // fizycznie przesunie postacie w stronę krawędzi ekranu!
             let targetCenterX = this.scrumStartX;
             const targetCenterY = GROUND_Y - 50;
             
-            // Clamp camera to avoid background clipping
             const halfW = (GAME_WIDTH / 2) / targetScale;
             if (targetCenterX < halfW) targetCenterX = halfW;
             if (targetCenterX > GAME_WIDTH - halfW) targetCenterX = GAME_WIDTH - halfW;
@@ -910,8 +989,6 @@ const lastInterval = Math.floor((this.scrumTimer - dt) / 2.0);
             this.cameraX = this.scrumCameraStartX + (targetCenterX - this.scrumCameraStartX) * ease;
             this.cameraY = this.scrumCameraStartY + (targetCenterY - this.scrumCameraStartY) * ease;
         } else if (this.scrumSlowMoTimer > 0) {
-            // POPRAWKA: Podczas finałowego Slow Motion zamrażamy aparat w pełnym zbliżeniu (1.25)
-            // i płynnie wyśrodkowujemy obiektyw dokładnie pomiędzy zawodnikami, aby uderzenie i powalenie były idealnie wyeksponowane.
             const targetScale = 1.25;
             this.cameraZoom = targetScale;
             
@@ -925,12 +1002,10 @@ const lastInterval = Math.floor((this.scrumTimer - dt) / 2.0);
             this.cameraX = targetCenterX;
             this.cameraY = targetCenterY;
         } else {
-            // Zoom out quickly if we exit scrum state and slow-mo ends
             if (this.cameraZoom > 1.0) {
                 this.cameraZoom -= dt * 2.0;
                 if (this.cameraZoom < 1.0) this.cameraZoom = 1.0;
                 
-                // Return to center
                 const easeOut = (this.cameraZoom - 1.0) / 0.5;
                 const defaultCenterX = GAME_WIDTH / 2;
                 const defaultCenterY = GAME_HEIGHT / 2;
@@ -1048,6 +1123,17 @@ this.acquiredMessage = "Prepare for the clash";
     }
     
 startScrum() {
+    this.scrumVisualProgress = 0.1;
+this.scrumBarBounceY = 0;
+this.scrumBarBounceVelY = 0;
+this.scrumBarBounceAngle = 0;
+this.scrumBarBounceVelAngle = 0;
+this.scrumBarErrorTimer = 0;
+    this.isSpecialAttackWinning = false;
+    this.scrumSpecialSlowMoTimer = 0;
+    this.scrumComboCount = 0;
+this.scrumSpecialFlashTimer = 0;
+this.scrumSpecialTextTimer = 0;
         this.subState = GameSubState.SCRUM_MATRIX;
         setBGM('scrum');
         playSFX('hit');
@@ -1075,8 +1161,9 @@ startScrum() {
         const fieldCenter = GAME_WIDTH / 2;
         const positionAdvantage = (midX - fieldCenter) * 0.55; // Przelicznik odległości
         
-        // Clampujemy przewagę do max -120 lub +120 (próg wygranej to 250), aby słabsza pozycja dawała znaczący debuff, ale NIGDY insta-win dla bota.
+      // Clampujemy przewagę do max -120 lub +120 (próg wygranej to 250), aby słabsza pozycja dawała znaczący debuff, ale NIGDY insta-win dla bota.
         this.scrumOffset = Math.max(-120, Math.min(120, positionAdvantage));
+        this.scrumTargetOffset = this.scrumOffset; // POPRAWKA: Stabilizacja celu na starcie klinczu
         
         // Just neatly pack them at the collision point
         leftPlayer.pos.x = midX - leftPlayer.size.x/2 - 15;
@@ -1108,31 +1195,70 @@ resolveScrumAction(actingPlayer: Player, action: 'PUSH' | 'HOLD', isBot: boolean
         
         const pushAmount = 32; 
         
-        if (isActionCorrect) {
+if (isActionCorrect) {
             // Prawidłowy refleks!
-            actingPlayer.scrumPushTimer = 0.25; // Zawodnik, który trafił w rytm, dostaje natychmiastowe smugi pędu w przód
+            actingPlayer.scrumPushTimer = 0.35; 
             if (actingPlayer === this.player) {
-                this.scrumOffset += pushAmount;
+                this.scrumComboCount++;
+                let finalPush = pushAmount;
+
+                // NALICZENIE IMPULSU DRGAŃ DLA POPRAWNEGO KLIKNIĘCIA (Mały, sprężysty bounce i wahadło)
+                this.scrumBarBounceVelY = 24;       
+                this.scrumBarBounceVelAngle = 1;    
+
+                if (this.scrumComboCount >= 5) {
+                    this.scrumComboCount = 0;
+                    finalPush = pushAmount * 3.6;        
+                    this.scrumSpecialFlashTimer = 1.0;   
+                    this.scrumSpecialTextTimer = 0.75;   
+                    this.scrumSpecialSlowMoTimer = 0.75; 
+                    
+                    // POTĘŻNY IMPULS ELASTYCZNEJ EKSPLOZJI (Kolosalna kompresja i zwrot wahadłowy paska przy 100%)
+                    this.scrumBarBounceVelY = 80;       
+                    this.scrumBarBounceVelAngle = 8;    
+                    
+                    this.bot.vel.x = 280; 
+                    
+                    if (Math.abs(this.scrumTargetOffset + finalPush) >= this.scrumWinOffset) {
+                        this.isSpecialAttackWinning = true;
+                    }
+                    
+                    playSFX('cheer');
+                    this.screenShake = 0.8;
+                    
+                    // Optymalizacja cząsteczek: wybuch płomieni idealnie wokół geometrycznych granic nowego paska!
+                    this.spawnParticles(actingPlayer.pos.x + actingPlayer.size.x/2, actingPlayer.pos.y, 'touchdown', 20);
+                    this.spawnParticles(GAME_WIDTH / 2 - 140, GAME_HEIGHT - 48, 'touchdown', 15);
+                    this.spawnParticles(GAME_WIDTH / 2 + 140, GAME_HEIGHT - 48, 'touchdown', 15);
+                }
+
+                this.scrumTargetOffset += finalPush; 
                 this.spawnParticles(actingPlayer.pos.x + actingPlayer.size.x/2, actingPlayer.pos.y, 'perfect', 10);
             } else {
-                this.scrumOffset -= pushAmount;
+                this.scrumTargetOffset -= pushAmount;
                 this.spawnParticles(actingPlayer.pos.x + actingPlayer.size.x/2, actingPlayer.pos.y, 'miss', 10);
             }
         } else {
             // Pudło / Zły przycisk!
             if (actingPlayer === this.player) {
-                this.scrumOffset -= pushAmount; // Kara dla gracza: krok do tyłu
-                this.bot.scrumPushTimer = 0.25; // Gracz spudłował, więc bot dynamicznie prze do przodu ze smugami!
-                this.spawnParticles(actingPlayer.pos.x + actingPlayer.size.x/2, actingPlayer.pos.y, 'miss', 10);
+                // IMPULS KARY (Aktywacja czerwieni i silne, szarpnięte, negatywne odbicie paska w górę i w lewo)
+                this.scrumBarErrorTimer = 0.65;      
+                this.scrumBarBounceVelY = -340;      
+                this.scrumBarBounceVelAngle = -35;   
                 
-                // MOMENT 2: Szorstki, wyraźny sygnał błędu (140ms). Telefon błyskawicznie karze za pomyłkę.
+                this.scrumComboCount = 0; 
+                this.scrumTargetOffset -= pushAmount; 
+                this.bot.scrumPushTimer = 0.35; 
+                this.spawnParticles(actingPlayer.pos.x + actingPlayer.size.x/2, actingPlayer.pos.y, 'miss', 10);
+                this.spawnParticles(GAME_WIDTH / 2, GAME_HEIGHT - 48, 'miss', 15); // Rozbłysk błędu na pasku
+                
                 if (typeof navigator !== 'undefined' && navigator.vibrate) {
                     navigator.vibrate(140);
                 }
             } else {
                 // Bot popełnił błąd – nagroda dla gracza: popychasz bota do przodu!
-                this.scrumOffset += pushAmount;
-                this.player.scrumPushTimer = 0.25; // Bot spudłował, więc gracz natychmiast zyskuje smugi przewagi!
+                this.scrumTargetOffset += pushAmount;
+                this.player.scrumPushTimer = 0.35; 
                 this.spawnParticles(actingPlayer.pos.x + actingPlayer.size.x/2, actingPlayer.pos.y, 'hit', 10);
             }
         }
@@ -1190,7 +1316,7 @@ this.screenShake = 0.5;
                 this.acquiredMessage = "GET THE TOUCHDOWN!";
                 this.pendingRunArrow = true; // POPRAWKA: Zamiast natychmiast odpalać strzałkę w zoomie, ustawiamy ją w stan oczekiwania na koniec slow-mo
             } else {
-                this.acquiredMessage = "OPPONENT GETTING THE TOUCHDOWN";
+                this.acquiredMessage = "OPPONENT GOT TOUCHDOWN";
                 this.showRunArrow = false;
                 this.pendingRunArrow = false;
             }

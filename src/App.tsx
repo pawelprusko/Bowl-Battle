@@ -356,7 +356,24 @@ export default function App() {
   const [dimensions, setDimensions] = useState({ width: 800, height: 450 });
   const [scale, setScale] = useState(1);
 
-  useEffect(() => {
+useEffect(() => {
+      // NOWOŚĆ: Automatyczne wyłączanie audio przy minimalizacji okna (Mute on Focus Loss)
+      const handleVisibilityChange = () => {
+          if (document.hidden) {
+              stopBGM(); // Wyłącza dźwięk po zminimalizowaniu gry
+          } else {
+              // Przywraca właściwy podkład muzyczny w zależności od aktualnego stanu rozgrywki
+              if (gameStateRef.current === GameState.PLAYING && worldRef.current) {
+                  if (worldRef.current.subState === 'SCRUM_MATRIX') {
+                      setBGM('scrum');
+                  } else {
+                      setBGM('board');
+                  }
+              }
+          }
+      };
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+
       // Try best-effort orientation lock on mount for PWAs
       try {
           const orientation: any = screen.orientation || (screen as any).mozOrientation || (screen as any).msOrientation;
@@ -431,9 +448,11 @@ export default function App() {
       handleResize();
       window.addEventListener('resize', resizeWithDelay);
       window.addEventListener('orientationchange', orientationChangeWithDelay);
+      
       return () => {
           window.removeEventListener('resize', resizeWithDelay);
           window.removeEventListener('orientationchange', orientationChangeWithDelay);
+          document.removeEventListener('visibilitychange', handleVisibilityChange); // CZYSZCZENIE: Usunięcie nasłuchiwania przy unmouncie
       };
   }, []);
 
