@@ -1350,10 +1350,13 @@ startKick() {
         if (this.player.role !== PlayerRole.ATTACKER || this.player.stunTimer > 0) return;
         if (this.kickInputLockout > 0) return; // OCHRONA: Ignoruj kliknięcia przez pierwsze 500ms
 
-        // KRYTYCZNA POPRAWKA: Jeśli pasek już automatycznie lata od startu extra pointa,
-        // naciśnięcie przycisku KICK na ekranie (onDown) zatwierdza aktualną pozycję kulki (One-Click) i blokuje zerowanie!
+        // KRYTYCZNA POPRAWKA DESKTOP HOVER: Jeśli subState to już KICKING i pasek ładuje się automatycznie,
+        // pozwalamy na strzał z przycisku HUD tylko wtedy, gdy kickHoldTimer przekroczy minimalny próg (0.15s).
+        // Zapobiega to sytuacjom, w których zwykłe najechanie myszką na desktopie symuluje fałszywy, natychmiastowy klik!
         if (this.subState === GameSubState.KICKING && this.isChargingKick) {
-            this.releaseKick();
+            if (this.kickHoldTimer > 0.15) {
+                this.releaseKick();
+            }
             return;
         }
 
