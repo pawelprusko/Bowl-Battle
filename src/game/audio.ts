@@ -1,43 +1,20 @@
 import { AUDIO_PATHS } from './constants';
 
-const sounds: Record<string, HTMLAudioElement> = {};
+// Magazyny na załadowane assety audio
+const sfxBuffers: Record<string, AudioBuffer> = {};
+const bgmElements: Record<string, HTMLAudioElement> = {};
+
 let currentBGM: HTMLAudioElement | null = null;
 let currentBGMKey: string | null = null;
-let stepAudio: HTMLAudioElement | null = null;
-let isStepActive: boolean = false;
-let stepFadeInterval: NodeJS.Timeout | null = null;
-
-export async function loadAudio() {
-    const promises: Promise<void>[] = [];
-
-    // Load BGM
-    for (const [key, path] of Object.entries(AUDIO_PATHS.bgm)) {
-        promises.push(loadSound(`bgm.${key}`, path));
-    }
-    // Load SFX
-    for (const [key, path] of Object.entries(AUDIO_PATHS.sfx)) {
-        promises.push(loadSound(`sfx.${key}`, path));
-    }
-
-    await Promise.all(promises);
-}
-
-function loadSound(id: string, path: string): Promise<void> {
-    return new Promise((resolve) => {
-        const audio = new Audio();
-        audio.src = path;
-        // Don't wait for full load, just register it so we don't hang
-        sounds[id] = audio;
-        
-        // Try to preload but don't block
-        audio.load();
-        
-        // We resolve immediately so the game doesn't hang on slow/missing audio
-        resolve();
-    });
-}
 
 let audioCtx: AudioContext | null = null;
+
+// Referencje dla pętli kroków opartej na czystym Web Audio API
+let stepSource: AudioBufferSourceNode | null = null;
+let stepGainNode: GainNode | null = null;
+let isStepActive: boolean = false;
+let stepFadeInterval: NodeJS.Timeout | null = null;
+let currentStepVolume: number = 0;
 
 function getAudioContext(): AudioContext | null {
     if (!audioCtx && typeof window !== 'undefined') {
@@ -50,81 +27,66 @@ function getAudioContext(): AudioContext | null {
     return audioCtx;
 }
 
-// NOWOŚĆ: Funkcja-klucz dla PWA i urządzeń mobilnych. 
-// Wywołana RAZ wewnątrz obsługi kliknięcia użytkownika, zdejmuje blokadę Safari/Chrome na zawsze.
+// Funkcja wywoływana przy kliknięciu przycisków w menu - zdejmuje blokadę mobilną
 export function unlockAudio() {
     const ctx = getAudioContext();
     if (ctx && ctx.state === 'suspended') {
         ctx.resume().catch(e => console.warn("AudioContext unlock failed", e));
     }
+    if (currentBGM && currentBGM.paused) {
+        currentBGM.play().catch(e => console.warn("BGM unlock force-play failed", e));
+    }
 }
 
-export function playSFX(id: string, volumeScale: number = 1.0) {
-    const soundKey = `sfx.${id}`;
-    const audio = sounds[soundKey];
-    if (audio) {
-        const clone = audio.cloneNode() as HTMLAudioElement;
-        
-        let baseVol = 0.7; 
-        let boostGain = 1.0; // Domyślny mnożnik głośności dla standardowych dźwięków
+// HYBRYDOWY LOADER: Ładuje muzykę klasycznie, a efekty jako binarne bufory do pamięci RAM
+export function loadAudio(): Promise<void> {
+    const ctx = getAudioContext();
+    const promises: Promise<void>[] = [];
 
-        if (id === 'special_attack') {
-            baseVol = 1.0; 
-            boostGain = 2.6; // Nasze sprawdzone podbicie cyfrowe
-        } else if (id === 'step') {
-            baseVol = 1.0; 
-        } else if (id === 'bounce') {
-            baseVol = 1.0; 
-            boostGain = 2.4; // Nasze sprawdzone podbicie cyfrowe
-        } else if (id === 'catch') {
-            baseVol = 1.0; 
-            boostGain = 2.4; // Nasze sprawdzone podbicie cyfrowe
-        } else {
-            baseVol = 0.8; 
-        }
-        
-        clone.volume = Math.min(1.0, baseVol * volumeScale);
-        
-        // POPRAWKA DLA SMARTFONÓW: Wszystkie dźwięki bez wyjątku wpinamy pod AudioContext.
-        // To gwarantuje, że kickoff odtworzy się bez problemu po zakończeniu 3-sekundowego countdownu!
-        const ctx = getAudioContext();
-        if (ctx) {
-            try {
-                const source = ctx.createMediaElementSource(clone);
-                const gainNode = ctx.createGain();
-                
-                gainNode.gain.value = boostGain;
-                
-                source.connect(gainNode);
-                gainNode.connect(ctx.destination);
-                
-                // KRYTYCZNE CZYSZCZENIE DLA PWA / MOBILE:
-                // Gdy dźwięk dobiegnie końca, natychmiast odpinamy kable w mikserze telefonu.
-                // To zapobiega wyciszaniu gry z powodu przepełnienia limitu otwartych ścieżek audio!
-                clone.onended = () => {
-                    source.disconnect();
-                    gainNode.disconnect();
-                };
-            } catch (e) {
-                console.warn('Web Audio Node linking bypassed safely', e);
-            }
-        }
-        
-        clone.play().catch(e => console.warn('SFX play failed', e));
-    }
+    // 1. Ładowanie podkładów muzycznych (BGM) - bezpieczne strumieniowanie HTML5
+    Object.entries(AUDIO_PATHS.bgm).forEach(([key, path]) => {
+        promises.push(new Promise((resolve) => {
+            const audio = new Audio();
+            audio.src = path;
+            audio.preload = 'auto';
+            audio.loop = true;
+            bgmElements[`bgm.${key}`] = audio;
+            resolve();
+        }));
+    });
+
+    // 2. Ładowanie efektów (SFX) - Fetch plików i dekodowanie do pamięci karty dźwiękowej
+    Object.entries(AUDIO_PATHS.sfx).forEach(([key, path]) => {
+        promises.push(
+            fetch(path)
+                .then(res => res.arrayBuffer())
+                .then(arrayBuffer => {
+                    if (ctx) {
+                        return ctx.decodeAudioData(arrayBuffer);
+                    }
+                    throw new Error("AudioContext not initialized");
+                })
+                .then(audioBuffer => {
+                    sfxBuffers[`sfx.${key}`] = audioBuffer;
+                })
+                .catch(e => {
+                    console.warn(`Failed to compile binary buffer for SFX: ${key}`, e);
+                    // Fallback pustego promisu, aby zagubiony plik nie zawiesił ładowania gry
+                })
+        );
+    });
+
+    return Promise.all(promises).then(() => {});
 }
 
 export function setBGM(type: 'board' | 'scrum' | 'menu' | 'gameover') {
     const soundKey = `bgm.${type}`;
     
-    // POPRAWKA BOMBODODPORNA: Jeśli dany utwór jest już wybrany jako obecny podkład, 
-    // ale z powodu restrykcji przeglądarki (Autoplay Policy) lub minimalizacji okna jest w stanie wstrzymania (paused),
-    // wymuszamy ponowną próbę odtworzenia (.play()) przy najbliższej interakcji użytkownika!
     if (currentBGMKey === soundKey && currentBGM) {
         if (currentBGM.paused) {
-            currentBGM.play().catch(e => console.warn('BGM autoplay retry failed', e));
+            currentBGM.play().catch(e => console.warn('BGM play retry failed', e));
         }
-        return; 
+        return;
     }
 
     if (currentBGM) {
@@ -132,80 +94,115 @@ export function setBGM(type: 'board' | 'scrum' | 'menu' | 'gameover') {
         currentBGM.currentTime = 0;
     }
 
-    const audio = sounds[soundKey];
-    if (audio) {
-        currentBGM = audio;
+    const nextBGM = bgmElements[soundKey];
+    if (nextBGM) {
+        currentBGM = nextBGM;
         currentBGMKey = soundKey;
-        currentBGM.loop = true;
-        
-        if (type === 'menu' || type === 'gameover') {
-            currentBGM.volume = 0.8; // Głośniej dla menu i game over
-        } else {
-            currentBGM.volume = 0.25; // Zmniejszono z 0.4 na 0.25
-        }
-        
-        currentBGM.play().catch(e => console.warn('BGM play failed', e));
+        currentBGM.volume = 0.4; // Zbalansowana, stabilna głośność muzyki w tle
+        currentBGM.play().catch(e => console.warn('BGM autoplay blocked by mobile policy', e));
     }
 }
 
 export function stopBGM() {
     if (currentBGM) {
         currentBGM.pause();
-        currentBGM.currentTime = 0;
-        currentBGM = null;
-        currentBGMKey = null;
+    }
+}
+
+export function playSFX(id: string, volumeScale: number = 1.0) {
+    const soundKey = `sfx.${id}`;
+    const ctx = getAudioContext();
+    const buffer = sfxBuffers[soundKey];
+
+    // Odtwarzanie bezpośrednio z AudioBuffer - wolne od lagów i blokad sprzętowych telefonu
+    if (ctx && buffer) {
+        if (ctx.state === 'suspended') {
+            ctx.resume();
+        }
+
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+
+        const gainNode = ctx.createGain();
+
+        let baseVol = 0.7; 
+        let boostGain = 1.0; 
+
+        // Przypisanie dedykowanych głośności i cyfrowych dopalaczy
+        if (id === 'special_attack') {
+            baseVol = 1.0; 
+            boostGain = 2.6; // Wzmocnienie o 260%
+        } else if (id === 'bounce') {
+            baseVol = 1.0; 
+            boostGain = 2.4; // Wzmocnienie o 240%
+        } else if (id === 'catch') {
+            baseVol = 1.0; 
+            boostGain = 2.4; // Wzmocnienie o 240%
+        } else if (id === 'step') {
+            baseVol = 1.0;
+        } else {
+            baseVol = 0.8; 
+        }
+
+        gainNode.gain.value = baseVol * volumeScale * boostGain;
+
+        source.connect(gainNode);
+        gainNode.connect(ctx.destination);
+
+        source.start(0);
     }
 }
 
 export function setStepSoundActive(active: boolean) {
-    if (isStepActive === active && stepAudio) return;
+    const ctx = getAudioContext();
+    if (!ctx) return;
 
-    if (!stepAudio) {
-        const audio = sounds['sfx.step'];
-        if (audio) {
-            stepAudio = audio.cloneNode() as HTMLAudioElement;
-            stepAudio.loop = true;
-            stepAudio.volume = 0;
-
-            // DOKŁADNIE TEN SAM WARUNEK I PODBICIE, KTÓRE POMOGŁO DLA CATCH I BOUNCE:
-            const ctx = getAudioContext();
-            if (ctx && ctx.state === 'running') {
-                try {
-                    const source = ctx.createMediaElementSource(stepAudio);
-                    const gainNode = ctx.createGain();
-                    gainNode.gain.value = 2.4; // Dokładnie takie samo mocne podbicie o 240%
-                    
-                    source.connect(gainNode);
-                    gainNode.connect(ctx.destination);
-                } catch (e) {
-                    console.warn('Web Audio for steps bypassed safely', e);
-                }
-            }
-        } else {
-            return; // Not loaded yet, don't set isStepActive
-        }
-    }
-
+    if (isStepActive === active && stepSource) return;
     isStepActive = active;
+
     if (stepFadeInterval) clearInterval(stepFadeInterval);
 
     if (active) {
-        stepAudio.play().catch(e => console.warn('Step play failed', e));
+        const buffer = sfxBuffers['sfx.step'];
+        if (!buffer) return;
+
+        if (stepSource) {
+            try { stepSource.stop(); } catch(e) {}
+        }
+
+        // Tworzenie natywnego, zapętlonego strumienia kroków Web Audio API
+        stepSource = ctx.createBufferSource();
+        stepSource.buffer = buffer;
+        stepSource.loop = true;
+
+        if (!stepGainNode) {
+            stepGainNode = ctx.createGain();
+            stepGainNode.connect(ctx.destination);
+        }
+
+        // Ustawienie głośności początkowej z uwzględnieniem wzmocnienia 2.4x
+        stepGainNode.gain.value = currentStepVolume * 2.4;
+
+        stepSource.connect(stepGainNode);
+        stepSource.start(0);
+
         stepFadeInterval = setInterval(() => {
-            // Zmieniamy limit z 0.6 na 1.0, żeby odtwarzacz nie przyciszał sztucznie dźwięku
-            if (stepAudio && stepAudio.volume < 1.0) {
-                stepAudio.volume = Math.min(1.0, stepAudio.volume + 0.1);
+            if (currentStepVolume < 1.0) {
+                currentStepVolume = Math.min(1.0, currentStepVolume + 0.1);
+                if (stepGainNode) stepGainNode.gain.value = currentStepVolume * 2.4;
             } else {
                 if (stepFadeInterval) clearInterval(stepFadeInterval);
             }
         }, 50);
     } else {
         stepFadeInterval = setInterval(() => {
-            if (stepAudio && stepAudio.volume > 0) {
-                stepAudio.volume = Math.max(0, stepAudio.volume - 0.1);
+            if (currentStepVolume > 0) {
+                currentStepVolume = Math.max(0, currentStepVolume - 0.1);
+                if (stepGainNode) stepGainNode.gain.value = currentStepVolume * 2.4;
             } else {
-                if (stepAudio) {
-                    stepAudio.pause();
+                if (stepSource) {
+                    try { stepSource.stop(); } catch(e) {}
+                    stepSource = null;
                 }
                 if (stepFadeInterval) clearInterval(stepFadeInterval);
             }
