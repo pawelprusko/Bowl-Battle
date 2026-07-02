@@ -1450,7 +1450,7 @@ this.screenShake = 0.5;
             } else {
                 this.pendingAcquiredMessage = "OPPONENT GOT TOUCHDOWN";
                 this.showRunArrow = false;
-                this.pendingRunArrow = true; // Zezwalamy pętli na odpalenie procedury po zakończeniu oddalenia kadru
+                this.pendingRunArrow = false; // POPRAWKA: Całkowicie wyłączamy bufor strzałki – to bot atakuje, gracz ma się bronić!
                 this.acquiredMessage = null; // Czyszczenie kadru planszy na czas trwania efektów i slow-motion
             }
                 } else {
