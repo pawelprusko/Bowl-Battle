@@ -1125,7 +1125,15 @@ update(dt: number) {
         // Zmiana logiki kroku na ciągłą ocenę prędkości (Global Step Sound)
         const isPlayerRunning = this.player.onGround && Math.abs(this.player.vel.x) > 20 && !this.player.isTackling;
         const isBotRunning = this.bot.onGround && Math.abs(this.bot.vel.x) > 20 && !this.bot.isTackling;
-        const shouldPlayStep = (isPlayerRunning || isBotRunning) && this.subState === GameSubState.REGULAR && !this.matchFinished;
+        
+        const validRunningStates = [
+            GameSubState.REGULAR, 
+            GameSubState.THE_SNAP, 
+            GameSubState.FREE_BALL, 
+            GameSubState.BALL_IN_AIR, 
+            GameSubState.KICKING
+        ];
+        const shouldPlayStep = (isPlayerRunning || isBotRunning) && validRunningStates.includes(this.subState) && !this.matchFinished;
         setStepSoundActive(shouldPlayStep);
     }
     

@@ -87,7 +87,7 @@ export function playSFX(id: string, volumeScale: number = 1.0) {
                     const source = ctx.createMediaElementSource(clone);
                     const gainNode = ctx.createGain();
                     
-                    if (id === 'special_attack') gainNode.gain.value = 2.4;
+                    if (id === 'special_attack') gainNode.gain.value = 2.6;
                     if (id === 'catch') gainNode.gain.value = 2.4;
                     if (id === 'bounce') gainNode.gain.value = 2.4;
                     
@@ -155,6 +155,21 @@ export function setStepSoundActive(active: boolean) {
             stepAudio = audio.cloneNode() as HTMLAudioElement;
             stepAudio.loop = true;
             stepAudio.volume = 0;
+
+            // DOKŁADNIE TEN SAM WARUNEK I PODBICIE, KTÓRE POMOGŁO DLA CATCH I BOUNCE:
+            const ctx = getAudioContext();
+            if (ctx && ctx.state === 'running') {
+                try {
+                    const source = ctx.createMediaElementSource(stepAudio);
+                    const gainNode = ctx.createGain();
+                    gainNode.gain.value = 2.4; // Dokładnie takie samo mocne podbicie o 240%
+                    
+                    source.connect(gainNode);
+                    gainNode.connect(ctx.destination);
+                } catch (e) {
+                    console.warn('Web Audio for steps bypassed safely', e);
+                }
+            }
         } else {
             return; // Not loaded yet, don't set isStepActive
         }
@@ -166,8 +181,9 @@ export function setStepSoundActive(active: boolean) {
     if (active) {
         stepAudio.play().catch(e => console.warn('Step play failed', e));
         stepFadeInterval = setInterval(() => {
-            if (stepAudio && stepAudio.volume < 0.6) {
-                stepAudio.volume = Math.min(0.6, stepAudio.volume + 0.1);
+            // Zmieniamy limit z 0.6 na 1.0, żeby odtwarzacz nie przyciszał sztucznie dźwięku
+            if (stepAudio && stepAudio.volume < 1.0) {
+                stepAudio.volume = Math.min(1.0, stepAudio.volume + 0.1);
             } else {
                 if (stepFadeInterval) clearInterval(stepFadeInterval);
             }
