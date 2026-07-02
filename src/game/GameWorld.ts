@@ -1,6 +1,6 @@
 import { GAME_WIDTH, GAME_HEIGHT, GROUND_Y, PHYSICS } from './constants';
 import { PlayerRole, GameSubState } from './Types';
-import { playSFX, setBGM } from './audio';
+import { playSFX, setBGM, setStepSoundActive } from './audio';
 
 export class Vector2 {
     constructor(public x: number, public y: number) {}
@@ -57,6 +57,7 @@ export class Player extends PhysicalBody {
     isBoosting: boolean = false;
     
     knockbackTimer: number = 0;
+    stepTimer: number = 0;
     
   stats = { power: 100, speed: 100, defense: 100 };
     debuffTimer: number = 0; // Keeping if needed for future skills
@@ -190,6 +191,8 @@ if (this.isRetreating) {
         
         this.updatePhysics(dt);
         
+        // Usunięto lokalne odtwarzanie kroku - przeniesiono do GameWorld.update
+        
      // Wall boundaries (Wprowadzenie marginesu 40px od krawędzi ekranu, aby postać nie znikała za ramą)
         const screenMargin = 40;
         if (this.pos.x < screenMargin) { this.pos.x = screenMargin; this.vel.x = 0; }
@@ -220,6 +223,10 @@ updatePhysics(dt: number, players: Player[] = []) {
             if (this.vel.y >= 0) {
                 if (this.vel.y > 20) {
                     this.vel.y *= -this.bounciness; // Bounce!
+                    
+                    // Skalowanie głośności odbicia na podstawie prędkości piłki (max 1.0)
+                    const bounceVol = Math.min(1.0, Math.abs(this.vel.y) / 400);
+                    playSFX('bounce', bounceVol);
                     
                     // Płynna zmiana koloru ognia przy odbiciu od murawy boiska
                     if (this.flameColor !== 'NONE') {
@@ -265,6 +272,8 @@ updatePhysics(dt: number, players: Player[] = []) {
             const margin = this.onGround ? 40 : 0;
             if (this.pos.x < margin) {
                 this.pos.x = margin;
+                const bounceVol = Math.min(1.0, Math.abs(this.vel.x) / 400);
+                if (bounceVol > 0.1) playSFX('bounce', bounceVol);
                 this.vel.x *= -0.8; 
                 // Zmiana koloru ognia przy uderzeniu w lewą krawędź boiska
                 if (this.flameColor !== 'NONE') {
@@ -272,6 +281,8 @@ updatePhysics(dt: number, players: Player[] = []) {
                 }
             } else if (this.pos.x > GAME_WIDTH - this.size.x - margin) {
                 this.pos.x = GAME_WIDTH - this.size.x - margin;
+                const bounceVol = Math.min(1.0, Math.abs(this.vel.x) / 400);
+                if (bounceVol > 0.1) playSFX('bounce', bounceVol);
                 this.vel.x *= -0.8; 
                 // Zmiana koloru ognia przy uderzeniu w prawą krawędź boiska
                 if (this.flameColor !== 'NONE') {
@@ -282,6 +293,8 @@ updatePhysics(dt: number, players: Player[] = []) {
         
         if (this.allowCeilingBounce && this.pos.y < 0) {
             this.pos.y = 0;
+            const bounceVol = Math.min(1.0, Math.abs(this.vel.y) / 400);
+            if (bounceVol > 0.1) playSFX('bounce', bounceVol);
             this.vel.y *= -0.8;
             // Zmiana koloru ognia przy uderzeniu w sufit
             if (this.flameColor !== 'NONE') {
@@ -546,7 +559,7 @@ update(dt: number) {
                     this.isSpecialAttackWinning = false;
                     const isPlayerAttacker = this.player.role === PlayerRole.ATTACKER;
                     
-                    this.resolveScrumWinner(true); // Oficjalne zwycięstwo gracza w minigrze QTE
+                    this.resolveScrumWinner(true, true); // Oficjalne zwycięstwo gracza w minigrze QTE
                     this.scrumSlowMoTimer = 0;     // Zerujemy standardowe slow-mo finiszu, aby od razu wyjść do zoom-outu
                     
                     if (isPlayerAttacker) {
@@ -1108,6 +1121,12 @@ update(dt: number) {
                 this.cameraY = GAME_HEIGHT / 2;
             }
         }
+        
+        // Zmiana logiki kroku na ciągłą ocenę prędkości (Global Step Sound)
+        const isPlayerRunning = this.player.onGround && Math.abs(this.player.vel.x) > 20 && !this.player.isTackling;
+        const isBotRunning = this.bot.onGround && Math.abs(this.bot.vel.x) > 20 && !this.bot.isTackling;
+        const shouldPlayStep = (isPlayerRunning || isBotRunning) && this.subState === GameSubState.REGULAR && !this.matchFinished;
+        setStepSoundActive(shouldPlayStep);
     }
     
    updateBot(dt: number) {
@@ -1207,6 +1226,7 @@ update(dt: number) {
         this.ball.flameColor = 'NONE'; 
         
         this.spawnParticles(attacker.pos.x, attacker.pos.y, 'pickup');
+        playSFX('catch');
         
         defender.isWaitingForScrumRecovery = false;
         defender.stunTimer = 0;
@@ -1369,9 +1389,14 @@ if (isActionCorrect) {
         return isActionCorrect;
     }
     
-resolveScrumWinner(playerWon: boolean) {
+resolveScrumWinner(playerWon: boolean, isFromSpecialAttack: boolean = false) {
+        if (this.subState !== GameSubState.SCRUM_MATRIX) return;
         this.subState = GameSubState.REGULAR;
         this.scrumSlowMoTimer = 0.4; // Ładujemy 0.4 sekundy czasu gry w zwolnionym tempie (co przełoży się na ok. 3.5 realnych sekund)
+        
+        if (!isFromSpecialAttack) {
+            playSFX('special_attack', 1.0);
+        }
         
         const attacker = this.player.role === PlayerRole.ATTACKER ? this.player : this.bot;
         const defender = this.player.role === PlayerRole.DEFENDER ? this.player : this.bot;
@@ -1651,16 +1676,16 @@ releaseKick() {
         const startY = isPlayer ? this.player.pos.y : this.bot.pos.y;
 
         if (isPerfect) {
-            // Piłka leci wysoko w niebo
-            this.ball.vel.set(dir * 900, -950); 
+            // Piłka leci wysokim łukiem do bramki, ale bez uderzania w sufit
+            this.ball.vel.set(dir * 600, -550); 
             this.spawnParticles(startX, startY, 'perfect', 20);
 
             // NATYCHMIASTOWE NALICZENIE: +1 punkt, dźwięk cheer i białe płomienie wokół tablicy wyników
             this.scoreFieldGoal(isPlayer ? this.player : this.bot);
         } else {
-            // Pudło: brak punktów, piłka spada krótko przed bramką
+            // Pudło: brak punktów, piłka turla się po ziemi / krótki lot
             this.subState = GameSubState.BALL_IN_AIR; 
-            this.ball.vel.set(dir * 550, -450); 
+            this.ball.vel.set(dir * 250, -150); 
             this.spawnParticles(startX, startY, 'miss', 10);
         }
     }

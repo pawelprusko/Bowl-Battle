@@ -37,7 +37,9 @@ export const ASSET_PATHS = {
 export const AUDIO_PATHS = {
     bgm: {
         board: '/assets/audio/bgm_board.mp3',
-        scrum: '/assets/audio/bgm_scrum.mp3'
+        scrum: '/assets/audio/bgm_scrum.mp3',
+        menu: '/assets/audio/bgm_menu.mp3',
+        gameover: '/assets/audio/bgm_gameover.mp3'
     },
     sfx: {
         kickoff: '/assets/audio/sfx_kickoff.mp3',
@@ -45,7 +47,11 @@ export const AUDIO_PATHS = {
         kick: '/assets/audio/sfx_kick.mp3',
         cheer: '/assets/audio/sfx_cheer.mp3',
         boo: '/assets/audio/sfx_boo.mp3',
-        special_attack: '/assets/audio/sfx_special_attack.mp3'
+        special_attack: '/assets/audio/sfx_special_attack.mp3',
+        step: '/assets/audio/sfx_step.mp3',
+        bounce: '/assets/audio/sfx_bounce.mp3',
+        catch: '/assets/audio/sfx_catch.mp3',
+        button_click: '/assets/audio/sfx_button_click.mp3'
     }
 };
 

@@ -3,7 +3,7 @@ import { GameState } from './game/Types';
 import { GameWorld } from './game/GameWorld';
 import { Renderer } from './game/Renderer';
 import { loadAssets } from './game/assets';
-import { loadAudio, setBGM, stopBGM } from './game/audio';
+import { loadAudio, setBGM, stopBGM, playSFX, setStepSoundActive } from './game/audio';
 import { updateGameDimensions, ASSET_PATHS } from './game/constants';
 
 const TriangleButton = ({ dir, onDown, onUp, onLeave }: { dir: 'left' | 'right', onDown: () => void, onUp: () => void, onLeave: () => void }) => {
@@ -295,9 +295,44 @@ export default function App() {
   const updateGameState = (newState: GameState) => {
       setGameState(newState);
       gameStateRef.current = newState;
+      if (newState !== GameState.PLAYING) {
+          setStepSoundActive(false);
+      }
+      if (newState === GameState.SPLASH) {
+          setBGM('menu');
+      } else if (newState === GameState.GAME_OVER) {
+          setBGM('gameover');
+      }
   };
 
+  useEffect(() => {
+      // Inicjalizacja menu BGM
+      const tryPlayMenuBGM = () => {
+          if (gameStateRef.current === GameState.SPLASH) {
+              setBGM('menu');
+          }
+          document.removeEventListener('click', tryPlayMenuBGM);
+          document.removeEventListener('keydown', tryPlayMenuBGM);
+          document.removeEventListener('touchstart', tryPlayMenuBGM);
+      };
+
+      document.addEventListener('click', tryPlayMenuBGM);
+      document.addEventListener('keydown', tryPlayMenuBGM);
+      document.addEventListener('touchstart', tryPlayMenuBGM);
+
+      if (gameState === GameState.SPLASH) {
+          loadAudio().then(() => setBGM('menu')).catch(e => console.warn(e));
+      }
+      
+      return () => {
+          document.removeEventListener('click', tryPlayMenuBGM);
+          document.removeEventListener('keydown', tryPlayMenuBGM);
+          document.removeEventListener('touchstart', tryPlayMenuBGM);
+      };
+  }, []);
+
   const handleRematchClick = () => {
+    playSFX('button_click');
     updateGameState(GameState.REMATCH_LOADING);
     
     // start loading
@@ -315,6 +350,7 @@ export default function App() {
   };
 
   const handlePlayClick = () => {
+    playSFX('button_click');
     updateGameState(GameState.LOADING);
     
     // Try to lock orientation and go fullscreen (Skip if in iframe like AI Studio preview to prevent reload loops)
@@ -367,6 +403,7 @@ useEffect(() => {
       const handleVisibilityChange = () => {
           if (document.hidden) {
               stopBGM(); // Wyłącza dźwięk po zminimalizowaniu gry
+              setStepSoundActive(false);
           } else {
               // Przywraca właściwy podkład muzyczny w zależności od aktualnego stanu rozgrywki
               if (gameStateRef.current === GameState.PLAYING && worldRef.current) {
@@ -375,6 +412,10 @@ useEffect(() => {
                   } else {
                       setBGM('board');
                   }
+              } else if (gameStateRef.current === GameState.SPLASH) {
+                  setBGM('menu');
+              } else if (gameStateRef.current === GameState.GAME_OVER) {
+                  setBGM('gameover');
               }
           }
       };
