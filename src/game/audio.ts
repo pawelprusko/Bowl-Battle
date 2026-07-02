@@ -66,36 +66,47 @@ export function playSFX(id: string, volumeScale: number = 1.0) {
         const clone = audio.cloneNode() as HTMLAudioElement;
         
         let baseVol = 0.7; 
+        let boostGain = 1.0; // Domyślny mnożnik głośności dla standardowych dźwięków
+
         if (id === 'special_attack') {
             baseVol = 1.0; 
+            boostGain = 2.6; // Nasze sprawdzone podbicie cyfrowe
         } else if (id === 'step') {
             baseVol = 1.0; 
         } else if (id === 'bounce') {
             baseVol = 1.0; 
+            boostGain = 2.4; // Nasze sprawdzone podbicie cyfrowe
         } else if (id === 'catch') {
             baseVol = 1.0; 
+            boostGain = 2.4; // Nasze sprawdzone podbicie cyfrowe
         } else {
             baseVol = 0.8; 
         }
         
         clone.volume = Math.min(1.0, baseVol * volumeScale);
         
-        if (id === 'special_attack' || id === 'bounce' || id === 'catch') {
-            const ctx = getAudioContext();
-            if (ctx && ctx.state === 'running') { // Sprawdzamy czy jest już odblokowany
-                try {
-                    const source = ctx.createMediaElementSource(clone);
-                    const gainNode = ctx.createGain();
-                    
-                    if (id === 'special_attack') gainNode.gain.value = 2.6;
-                    if (id === 'catch') gainNode.gain.value = 2.4;
-                    if (id === 'bounce') gainNode.gain.value = 2.4;
-                    
-                    source.connect(gainNode);
-                    gainNode.connect(ctx.destination);
-                } catch (e) {
-                    console.warn('Web Audio Node linking bypassed safely', e);
-                }
+        // POPRAWKA DLA SMARTFONÓW: Wszystkie dźwięki bez wyjątku wpinamy pod AudioContext.
+        // To gwarantuje, że kickoff odtworzy się bez problemu po zakończeniu 3-sekundowego countdownu!
+        const ctx = getAudioContext();
+        if (ctx) {
+            try {
+                const source = ctx.createMediaElementSource(clone);
+                const gainNode = ctx.createGain();
+                
+                gainNode.gain.value = boostGain;
+                
+                source.connect(gainNode);
+                gainNode.connect(ctx.destination);
+                
+                // KRYTYCZNE CZYSZCZENIE DLA PWA / MOBILE:
+                // Gdy dźwięk dobiegnie końca, natychmiast odpinamy kable w mikserze telefonu.
+                // To zapobiega wyciszaniu gry z powodu przepełnienia limitu otwartych ścieżek audio!
+                clone.onended = () => {
+                    source.disconnect();
+                    gainNode.disconnect();
+                };
+            } catch (e) {
+                console.warn('Web Audio Node linking bypassed safely', e);
             }
         }
         
