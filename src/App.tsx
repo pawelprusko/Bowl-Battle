@@ -199,11 +199,16 @@ function MatchOverFallback({ onPlay, gameState, loadingProgress, pScore, bScore 
                 </>
             )}
             
-            {gameState === GameState.GAME_OVER && (
-                <div className="absolute z-10 flex flex-col items-center top-[15%]">
-                    <h2 className="text-6xl font-black mb-4 drop-shadow-[0_4px_10px_rgba(0,0,0,0.8)]">MATCH OVER</h2>
-                    <p className="text-3xl drop-shadow-[0_4px_10px_rgba(0,0,0,0.8)]">
-                        {pScore > bScore ? 'YOU WIN!' : pScore < bScore ? 'SWEATYSTEVE WINS!' : 'DRAW!'}
+{gameState === GameState.GAME_OVER && (
+                <div className="absolute z-10 flex flex-col items-center top-[10%]">
+                    <h2 className="text-5xl font-black mb-2 drop-shadow-[0_4px_10px_rgba(0,0,0,0.8)] tracking-tight">MATCH OVER</h2>
+                    {/* POPRAWKA: Precyzyjna weryfikacja remisu zgodnie z oczekiwaniami (MATCH IS A DRAW!) */}
+                    <p className="text-2xl drop-shadow-[0_4px_10px_rgba(0,0,0,0.8)] font-bold tracking-wide text-purple-200 uppercase">
+                        {pScore > bScore ? 'PLAYER SaltySam WON!' : pScore < bScore ? 'PLAYER SweatySteve WON!' : "MATCH IS A DRAW!"}
+                    </p>
+                    {/* POPRAWKA ERGONOMII: Zbalansowany badge cyfrowy, który idealnie mieści się nad przyciskiem PLAY AGAIN */}
+                    <p className="text-3xl font-black mt-4 px-6 py-1 bg-black/75 backdrop-blur-md rounded-xl border border-white/10 tracking-widest font-mono text-purple-300 shadow-[0_4px_15px_rgba(168,85,247,0.35)]">
+                        {pScore} : {bScore}
                     </p>
                 </div>
             )}
@@ -340,7 +345,7 @@ export default function App() {
     });
   };
 
-  const startGame = () => {
+const startGame = () => {
     updateGameState(GameState.PLAYING);
     if (!worldRef.current) {
         worldRef.current = new GameWorld();
@@ -349,7 +354,7 @@ export default function App() {
         worldRef.current.resetToSnap();
         worldRef.current.playerScore = 0;
         worldRef.current.botScore = 0;
-        worldRef.current.timeLeft = 45;
+        worldRef.current.timeLeft = 120; // POPRAWKA: Pełne 120 sekund na zegarze przy restarcie z poziomu menu końcowego
     }
   };
   
@@ -478,13 +483,13 @@ useEffect(() => {
       };
   }, [gameState]);
 
-  const gameLoop = (time: number) => {
+const gameLoop = (time: number) => {
     const dt = Math.min((time - lastTimeRef.current) / 1000, 0.1); // Cap dt
     lastTimeRef.current = time;
     
     if (worldRef.current && rendererRef.current) {
-        const timeScale = worldRef.current.subState === 'SCRUM_MATRIX' ? 0.3 : 1.0;
-        worldRef.current.update(dt * timeScale);
+        // POPRAWKA: Przekazujemy czysty, rzeczywisty czas dt. Skalowanie klatek (0.3) obsługuje teraz wewnętrznie GameWorld, co zapobiega spowalnianiu zegara meczu!
+        worldRef.current.update(dt);
         rendererRef.current.render(worldRef.current);
         
 if (typeof navigator !== 'undefined' && navigator.vibrate) {
@@ -529,7 +534,9 @@ if (typeof navigator !== 'undefined' && navigator.vibrate) {
             return prev;
         });
         
-        if (worldRef.current.timeLeft <= 0 && worldRef.current.subState !== 'CELEBRATION' && gameStateRef.current === GameState.PLAYING) {
+ // POPRAWKA SYNCHRONIZACJI KONCA: React podmienia ekran na GAME_OVER dopiero wtedy, 
+        // kiedy flaga końca jest aktywna, a timer zamrożenia zawodników na boisku (2.5s) zbiegł do zera!
+        if (worldRef.current.matchFinished && worldRef.current.matchFreezeTimer <= 0 && gameStateRef.current === GameState.PLAYING) {
             updateGameState(GameState.GAME_OVER);
         }
     }
@@ -682,9 +689,10 @@ const handleScrumPush = () => {
                         </div>
                     </div>
 
-                    {/* Timer */}
+            {/* Timer */}
                     <div className="flex flex-col items-center z-20" style={{ marginTop: '0.2rem' }}>
-                        <div className="bg-black/80 text-white px-6 py-2 rounded-xl text-4xl font-black font-mono border-2 border-white/20 shadow-lg relative overflow-hidden">
+                        {/* POPRAWKA HUD: Dodano stabilne min-w-[95px] oraz text-center, gwarantując eleganckie dopasowanie wartości 120 bez ścisku w ramce */}
+                        <div className="bg-black/80 text-white px-7 py-2 rounded-xl text-4xl font-black font-mono border-2 border-white/20 shadow-lg relative overflow-hidden min-w-[95px] text-center">
                             <div className="absolute inset-0 bg-gradient-to-b from-white/10 to-transparent"></div>
                             {hudState.time}
                         </div>
@@ -739,7 +747,7 @@ const handleScrumPush = () => {
                            )}
                        </div>
                        
-    {/* Right Controls */}
+{/* Right Controls */}
                        <div className="flex gap-4 pointer-events-auto items-end translate-y-4">
                            {hudState.subState === 'SCRUM_MATRIX' && !hudState.isExtraPoint ? (
                                <ActionButton 
@@ -752,11 +760,13 @@ const handleScrumPush = () => {
                            ) : (
                                <>
                                    {hudState.isExtraPoint && hudState.playerRole === 'ATTACKER' && (
+                                       /* POPRAWKA BOMBODODPORNA: Ponieważ pasek wykopu leci automatycznie od pierwszej sekundy, 
+                                          przycisk wymaga jedynie pojedynczego, intencjonalnego tapnięcia (onDown). 
+                                          Usunięcie obsługi onUp i onLeave całkowicie eliminuje problem samoczynnych wykopów 
+                                          spowodowanych ześlizgnięciem się palca lub fałszywym stanem hover na desktopie/mobile! */
                                        <ActionButton 
                                            text="KICK"
                                            onDown={handleKickPress}
-                                           onUp={handleKickRelease}
-                                           onLeave={handleKickRelease}
                                        />
                                    )}
                                </>

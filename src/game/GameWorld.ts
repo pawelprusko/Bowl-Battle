@@ -296,8 +296,8 @@ export class GameWorld {
     bot = new Player(true);
     ball = new Ball();
     
-    subState = GameSubState.COUNTDOWN;
-    timeLeft = 60;
+ subState = GameSubState.COUNTDOWN;
+    timeLeft = 120; // POPRAWKA: Wydłużono bazowy czas rozgrywki do idealnych 120 sekund (2 minuty pełnej akcji!)
     playerScore = 0;
     botScore = 0;
     
@@ -362,8 +362,17 @@ scrumSpecialTextTimer = 0;    // Timer wyświetlania wielkiego napisu SPECIAL! n
     scrumBarBounceY = 0;          // Amplituda sprężynowania pionowego (kompresja)
     scrumBarBounceVelY = 0;       // Prędkość sprężynowania pionowego
     scrumBarBounceAngle = 0;      // Kąt wychylenia wahadłowego (pendulum wobble)
-    scrumBarBounceVelAngle = 0;   // Prędkość kątowa wahadła
-    scrumBarErrorTimer = 0;       // Czas trwania alarmowej czerwieni paska po błędzie
+ scrumBarBounceVelAngle = 0;   // Prędkość kątowa wahadła
+    scrumBarErrorTimer = 0;       // Czas trwania alarmowej czerwieni paska po błądzie
+    
+ // NOWOŚĆ: Zarządzanie bezpieczną, płynną procedurą końca meczu po zoom-outu kamery
+    matchFinished = false;        // Flaga informująca, czy mecz został oficjalnie zakończony na planszy
+    matchFreezeTimer = 0;         // Odliczanie czasu zamrożenia zawodników w miejscu przed wejściem ekranu końcowego
+    isWhistlePlayed = false;      // Blokada jednokrotnego odtworzenia dźwięku syreny końcowej
+    
+    // NOWOŚĆ: Synchronizacja komunikatów TD oraz opóźnienia startu bota po zoom-outu
+    pendingAcquiredMessage: string | null = null; // Bufor przechowujący komunikat TD do momentu ukończenia zoom-outu
+    botTouchdownDelayTimer = 0;                  // Licznik 1-sekundowego zatrzymania bota po wygranej w klinczu
 
     celebrationTimeoutId: any = null;
 
@@ -421,9 +430,14 @@ this.isChargingKick = false;
         this.kickHoldTimer = 0;
 this.isExtraPointAttempt = false;
         this.isPerfectKick = false; // Resetowanie pamięci strzału przy nowej rundzie
-        this.showRunArrow = false;  // Schowanie strzałki przy restarcie
+this.showRunArrow = false;  // Schowanie strzałki przy restarcie
         this.pendingRunArrow = false;
         this.kickInputLockout = 0;
+this.matchFinished = false;
+        this.matchFreezeTimer = 0;
+        this.isWhistlePlayed = false;
+        this.pendingAcquiredMessage = null;
+        this.botTouchdownDelayTimer = 0;
     }
     
     spawnParticles(x: number, y: number, type: string, count: number = 10) {
@@ -457,9 +471,67 @@ this.isExtraPointAttempt = false;
     
 update(dt: number) {
         const realDt = dt; // Zapisujemy czysty, rzeczywisty upływ sekundy przed jakimkolwiek spowolnieniem
-// POPRAWKA CZASU I WSTAWANIA: Wydłużono czas szarży do 0.75s, aby bot w pełni wylądował, eliminując bezczynne leżenie na trawie!
+
+        // POPRAWKA CZASU: Standardowe zwalnianie klatek klinczu (0.3) przenosimy bezpośrednio do wnętrza świata gry, by nie zniekształcać realDt zegara!
+        if (this.subState === GameSubState.SCRUM_MATRIX && this.scrumSpecialSlowMoTimer <= 0) {
+            dt *= 0.3;
+        }
+
+// ========================================================================
+        // POPRAWKA: ULTRA-PŁYNNE ZAKOŃCZENIE PLANSZY (Smooth Match End Transition)
+        // Zawodnicy nie przeskakują już skokowo – płynnie odsuwają się od siebie do pozycji pionowej stojącej!
+        // ========================================================================
+        const isAnimationActive = this.scrumSpecialSlowMoTimer > 0 || this.scrumSlowMoTimer > 0 || this.subState === GameSubState.CELEBRATION;
+        if (this.timeLeft <= 0 && !isAnimationActive && !this.matchFinished) {
+            if (this.subState === GameSubState.SCRUM_MATRIX) {
+                this.subState = GameSubState.REGULAR;
+                // Wykorzystujemy punkt zderzenia klinczu jako kotwicę do płynnego rozsunięcia
+            } else {
+                // Jeśli byli na otwartej planszy, zapisujemy ich obecny środek geometryczny
+                this.scrumStartX = (this.player.pos.x + this.bot.pos.x + this.player.size.x) / 2;
+            }
+            this.matchFinished = true;
+            this.matchFreezeTimer = 2.5; // Zamrożenie akcji na boisku na dokładnie 2.5 sekundy czasu rzeczywistego
+            this.ball.flameColor = 'NONE'; // Natychmiastowe zgaszenie aury ognia na piłce
+        }
+
+        if (this.matchFinished) {
+            if (!this.isWhistlePlayed) {
+                playSFX('kickoff'); // Odpalenie dźwięku syreny końcowej
+                this.isWhistlePlayed = true;
+            }
+            this.matchFreezeTimer -= realDt;
+            if (this.matchFreezeTimer < 0) this.matchFreezeTimer = 0;
+
+            // INŻYNIERIA WYJŚCIA Z KLINCZU: Obaj zawodnicy z maślaną płynnością odsuwają się od siebie o bezpieczny dystans
+            const targetPlayerX = this.scrumStartX - this.player.size.x - 24;
+            const targetBotX = this.scrumStartX + 24;
+            this.player.pos.x += (targetPlayerX - this.player.pos.x) * realDt * 7.5;
+            this.bot.pos.x += (targetBotX - this.bot.pos.x) * realDt * 7.5;
+
+            // Piłka płynnie i naturalnie opada/centruje się na murawie boiska pomiędzy nimi
+            const targetBallX = this.scrumStartX - this.ball.size.x / 2;
+            this.ball.pos.x += (targetBallX - this.ball.pos.x) * realDt * 7.5;
+            if (this.ball.pos.y < GROUND_Y - this.ball.size.y) {
+                this.ball.pos.y += (GROUND_Y - this.ball.size.y - this.ball.pos.y) * realDt * 7.5;
+            }
+
+            // Pełna blokada sterowania i pędów wejściowych
+            this.player.dirX = 0;
+            this.bot.dirX = 0;
+            this.player.vel.set(0, 0);
+            this.bot.vel.set(0, 0);
+            this.ball.vel.set(0, 0);
+
+            // Aktualizacja klatek szkieletu postaci bez nakładania pędu przemieszczenia
+            this.player.updatePhysics(realDt);
+            this.bot.updatePhysics(realDt);
+            return; // Zawieszenie pętli świata na czas trwania stop-klatki meczu
+        }
+
+        // POPRAWKA CZASU I WSTAWANIA: Wydłużono czas szarży do 0.75s, aby bot w pełni wylądował, eliminując bezczynne leżenie na trawie!
         if (this.scrumSpecialSlowMoTimer > 0) {
-            this.scrumSpecialSlowMoTimer -= dt; 
+            this.scrumSpecialSlowMoTimer -= dt; // Odliczamy w zwolnionym czasie gry, by zsynchronizować fizykę bota
             
             this.player.scrumPushTimer = this.scrumSpecialSlowMoTimer;
             this.bot.knockbackTimer = this.scrumSpecialSlowMoTimer;
@@ -492,9 +564,10 @@ update(dt: number) {
                     this.bot.knockbackTimer = 0;
                 }
             }
-            dt *= 0.20; 
+            dt *= 0.20; // Aplikacja 5-krotnego kinowego zwolnienia klatek
         }
-// Odliczanie timerów HUD w czasie rzeczywistym
+
+        // Odliczanie timerów HUD w czasie rzeczywistym
         if (this.scrumSpecialTextTimer > 0 && this.scrumSpecialSlowMoTimer <= 0) this.scrumSpecialTextTimer -= realDt;
         if (this.scrumSpecialFlashTimer > 0) this.scrumSpecialFlashTimer -= realDt;
 
@@ -526,18 +599,14 @@ update(dt: number) {
         this.scrumBarBounceVelY += accY * realDt;
         this.scrumBarBounceY += this.scrumBarBounceVelY * realDt;
 
-        // FINAŁOWE SLOW MOTION: Jeśli walka w klinczu właśnie się zakończyła,
+// FINAŁOWE SLOW MOTION: Jeśli walka w klinczu właśnie się zakończyła,
         // drastycznie spowolniamy upływ czasu (ok. 8-krotnie), aby pokazać epickie uderzenie i bezwładny upadek postaci.
         if (this.scrumSlowMoTimer > 0) {
             dt *= 0.12; // Mnożnik spowolnienia (0.12). Fizyka i cząsteczki poruszają się jak w gęstym syropie!
             this.scrumSlowMoTimer -= dt;
             if (this.scrumSlowMoTimer <= 0) {
                 this.scrumSlowMoTimer = 0;
-                // POPRAWKA: Strzałka naprowadzająca pojawia się DOPIERO po wyjściu ze slow-motion i zoom-outu kamery!
-                if (this.pendingRunArrow) {
-                    this.showRunArrow = true;
-                    this.pendingRunArrow = false;
-                }
+                // POPRAWKA: Aktywację strzałki i tekstu delegujemy niżej, do klatki pełnego zoom-outu kamery!
             }
         }
 
@@ -552,8 +621,9 @@ update(dt: number) {
             this.lastGameWidth = GAME_WIDTH;
         }
 
+        // POPRAWKA CZASU: Używamy czystego realDt do odejmowania czasu meczu, dzięki czemu zegar płynie równomiernie niezależnie od klinczów i slow-motion!
         if (this.timeLeft > 0 && this.subState !== GameSubState.CELEBRATION && this.subState !== GameSubState.COUNTDOWN) {
-            this.timeLeft -= dt;
+            this.timeLeft -= realDt;
             if (this.timeLeft < 0) this.timeLeft = 0;
         }
         
@@ -693,7 +763,7 @@ update(dt: number) {
         this.player.update(dt);
         this.bot.update(dt);
         
-// Determine facing directions
+        // Determine facing directions
         if (this.subState === GameSubState.REGULAR || this.subState === GameSubState.KICKING || this.subState === GameSubState.COUNTDOWN || this.subState === GameSubState.CELEBRATION || this.subState === GameSubState.BALL_ACQUIRED || this.subState === GameSubState.SCRUM_MATRIX || this.subState === GameSubState.FREE_BALL) {
             
             // Attacker always faces their goal. Defender always faces attacker.
@@ -705,7 +775,7 @@ update(dt: number) {
                 if (this.bot.stunTimer <= 0 && !this.bot.isWaitingForScrumRecovery && (!this.bot.isRetreating || this.bot.isAtRetreatPos)) {
                     this.bot.facingX = (this.bot.pos.x > this.player.pos.x) ? -1 : 1; 
                 }
-} else if (this.bot.role === PlayerRole.ATTACKER) {
+            } else if (this.bot.role === PlayerRole.ATTACKER) {
                 if (this.bot.stunTimer <= 0 && !this.bot.isWaitingForScrumRecovery && (!this.bot.isRetreating || this.bot.isAtRetreatPos)) {
                     this.bot.facingX = -1; // Bot goal is left
                 }
@@ -753,7 +823,7 @@ update(dt: number) {
         if (this.subState === GameSubState.SCRUM_MATRIX) {
             this.scrumTimer += dt;
             
-    // POPRAWKA: Przeciwnik wykonuje teraz potężny atak cyklicznie co 1.2 sekundy (zamiast 2.0s), zwiększając wyzwanie!
+            // POPRAWKA: Przeciwnik wykonuje teraz potężny atak cyklicznie co 1.2 sekundy (zamiast 2.0s), zwiększając wyzwanie!
             const lastInterval = Math.floor((this.scrumTimer - dt) / 1.2);
             const currentInterval = Math.floor(this.scrumTimer / 1.2);
             if (currentInterval > lastInterval && this.scrumTimer > 0.5) {
@@ -768,7 +838,7 @@ update(dt: number) {
             }
 
             // POPRAWKA UX: Podczas trwania szarży Special Attack oraz gdy bot leży powalony na ziemi,
-            // całkowicie wyłączamy i ukrywamy prompty QTE oraz strzałki, dając czas na odtworzenie animacji leżenia i wstawania.
+            // całkowicie wyłączamy i ukrywamy prompte QTE oraz strzałki, dając czas na odtworzenie animacji leżenia i wstawania.
             if (this.scrumSpecialSlowMoTimer > 0 || this.bot.stunTimer > 0) {
                 this.scrumPrompt = null;
                 this.scrumPromptTimer = 0.2; 
@@ -930,7 +1000,9 @@ update(dt: number) {
                 }
             }
 
-            if (this.subState !== GameSubState.CELEBRATION && this.subState !== GameSubState.KICKING) {
+    // POPRAWKA: Ograniczamy detekcję strefy punktowej ściśle do stanu REGULAR. 
+            // Zapobiega to natychmiastowemu zaliczeniu przyłożenia w momencie podniesienia z ziemi upuszczonej piłki (fumble) bezpośrednio w endzone.
+            if (this.subState === GameSubState.REGULAR) {
                 if (attacker === this.player && attacker.pos.x + attacker.size.x >= GAME_WIDTH - 42) {
                     this.scoreTouchdown(this.player);
                 } else if (attacker === this.bot && attacker.pos.x <= 42) {
@@ -1001,10 +1073,26 @@ update(dt: number) {
             
             this.cameraX = targetCenterX;
             this.cameraY = targetCenterY;
-        } else {
+    } else {
             if (this.cameraZoom > 1.0) {
                 this.cameraZoom -= dt * 2.0;
-                if (this.cameraZoom < 1.0) this.cameraZoom = 1.0;
+                if (this.cameraZoom < 1.0) {
+                    this.cameraZoom = 1.0;
+                    
+                    // POPRAWKA: W ułamku sekundy, w którym kamera kończy zoom-out boiska, aktywujemy buforowane napisy i strzałki TD!
+                    if (this.pendingAcquiredMessage) {
+                        this.acquiredMessage = this.pendingAcquiredMessage;
+                        this.pendingAcquiredMessage = null;
+                    }
+                    if (this.pendingRunArrow) {
+                        this.showRunArrow = true;
+                        this.pendingRunArrow = false;
+                    }
+                    // Jeśli to bot wygrał starcie jako Atakujący, odpalamy mu 1-sekundowy licznik zamrożenia pozycji
+                    if (this.bot.role === PlayerRole.ATTACKER && this.subState === GameSubState.REGULAR && !this.matchFinished) {
+                        this.botTouchdownDelayTimer = 1.0;
+                    }
+                }
                 
                 const easeOut = (this.cameraZoom - 1.0) / 0.5;
                 const defaultCenterX = GAME_WIDTH / 2;
@@ -1020,8 +1108,18 @@ update(dt: number) {
         }
     }
     
-    updateBot(dt: number) {
+   updateBot(dt: number) {
         if (this.bot.stunTimer > 0 || this.bot.isRetreating) return;
+        
+        // POPRAWKA: Bezwzględne zatrzymanie i zerowanie pędów bota przez 1 sekundę po zoom-outu, dające graczowi pełny czas na reakcję!
+        if (this.botTouchdownDelayTimer > 0) {
+            this.botTouchdownDelayTimer -= dt;
+            if (this.botTouchdownDelayTimer < 0) this.botTouchdownDelayTimer = 0;
+            this.bot.dirX = 0;
+            this.bot.vel.x = 0;
+            return;
+        }
+
         if (this.subState === GameSubState.CELEBRATION) {
              this.bot.dirX = 0;
              return;
@@ -1311,14 +1409,16 @@ this.screenShake = 0.5;
             this.spawnParticles(defender.pos.x, defender.pos.y, 'hit', 20);
             this.botAvoidTimer = 6.0; // Prevent immediate re-tackle after waking up
 
-// Wygrana atakującego (Bieg po przyłożenie na prawą stronę)
+// POPRAWKA: Komunikaty i intencje strzałek TD przekazujemy do bezpiecznych buforów oczekujących na pełne oddalenie obiektywu boiska
             if (attacker === this.player) {
-                this.acquiredMessage = "GET THE TOUCHDOWN!";
-                this.pendingRunArrow = true; // POPRAWKA: Zamiast natychmiast odpalać strzałkę w zoomie, ustawiamy ją w stan oczekiwania na koniec slow-mo
+                this.pendingAcquiredMessage = "GET THE TOUCHDOWN!";
+                this.pendingRunArrow = true; 
+                this.acquiredMessage = null; // Czyszczenie kadru planszy na czas trwania efektów i slow-motion
             } else {
-                this.acquiredMessage = "OPPONENT GOT TOUCHDOWN";
+                this.pendingAcquiredMessage = "OPPONENT GOT TOUCHDOWN";
                 this.showRunArrow = false;
-                this.pendingRunArrow = false;
+                this.pendingRunArrow = true; // Zezwalamy pętli na odpalenie procedury po zakończeniu oddalenia kadru
+                this.acquiredMessage = null; // Czyszczenie kadru planszy na czas trwania efektów i slow-motion
             }
                 } else {
                     // Defender wins!
