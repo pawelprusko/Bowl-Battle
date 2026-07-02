@@ -44,7 +44,8 @@ export const AUDIO_PATHS = {
         hit: '/assets/audio/sfx_hit.mp3',
         kick: '/assets/audio/sfx_kick.mp3',
         cheer: '/assets/audio/sfx_cheer.mp3',
-        boo: '/assets/audio/sfx_boo.mp3'
+        boo: '/assets/audio/sfx_boo.mp3',
+        special_attack: '/assets/audio/sfx_special_attack.mp3'
     }
 };
 

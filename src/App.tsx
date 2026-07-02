@@ -356,6 +356,7 @@ const startGame = () => {
         worldRef.current.botScore = 0;
         worldRef.current.timeLeft = 120; // POPRAWKA: Pełne 120 sekund na zegarze przy restarcie z poziomu menu końcowego
     }
+    setBGM('board');
   };
   
   const [dimensions, setDimensions] = useState({ width: 800, height: 450 });

@@ -34,13 +34,13 @@ function loadSound(id: string, path: string): Promise<void> {
     });
 }
 
-export function playSFX(id: string) {
+export function playSFX(id: string, volumeScale: number = 1.0) {
     const soundKey = `sfx.${id}`;
     const audio = sounds[soundKey];
     if (audio) {
         // Clone node so we can play overlapping sounds (e.g. multiple hits)
         const clone = audio.cloneNode() as HTMLAudioElement;
-        clone.volume = 0.7; // Optional: set SFX volume
+        clone.volume = Math.min(1.0, 0.7 * volumeScale); // Optional: set SFX volume
         clone.play().catch(e => console.warn('SFX play failed', e));
     }
 }

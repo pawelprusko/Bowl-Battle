@@ -831,6 +831,7 @@ update(dt: number) {
                 this.bot.scrumPushTimer = 0.35; 
                 this.spawnParticles(this.bot.pos.x + this.bot.size.x/2, this.bot.pos.y, 'miss', 15);
                 this.screenShake = 0.4;
+                playSFX('hit');
                 
                 if (typeof navigator !== 'undefined' && navigator.vibrate) {
                     navigator.vibrate([160, 60, 100]);
@@ -1080,6 +1081,7 @@ update(dt: number) {
                     this.cameraZoom = 1.0;
                     
                     // POPRAWKA: W ułamku sekundy, w którym kamera kończy zoom-out boiska, aktywujemy buforowane napisy i strzałki TD!
+                    setBGM('board');
                     if (this.pendingAcquiredMessage) {
                         this.acquiredMessage = this.pendingAcquiredMessage;
                         this.pendingAcquiredMessage = null;
@@ -1282,10 +1284,8 @@ resolveScrumAction(actingPlayer: Player, action: 'PUSH' | 'HOLD', isBot: boolean
         // Zapamiętujemy czy ruch był poprawny przed skasowaniem promptu
         const isActionCorrect = this.scrumPrompt === action;
         
-        // SFX: 'hit' for player mistake or any bot attack
-        if (actingPlayer === this.bot || (!isActionCorrect && actingPlayer === this.player)) {
-            playSFX('hit');
-        }
+        // SFX: 'hit' for player action (correct or incorrect) or any bot action
+        playSFX('hit');
 
         // Zabezpieczenie przed spamowaniem i przytrzymywaniem: jeden zawodnik może wykonać tylko JEDNĄ akcję na jedno okienko promptu
         if (actingPlayer.scrumCharging) return;
@@ -1321,6 +1321,7 @@ if (isActionCorrect) {
                         this.isSpecialAttackWinning = true;
                     }
                     
+                    playSFX('special_attack', 2);
                     playSFX('cheer');
                     this.screenShake = 0.8;
                     
@@ -1370,7 +1371,6 @@ if (isActionCorrect) {
     
 resolveScrumWinner(playerWon: boolean) {
         this.subState = GameSubState.REGULAR;
-        setBGM('board');
         this.scrumSlowMoTimer = 0.4; // Ładujemy 0.4 sekundy czasu gry w zwolnionym tempie (co przełoży się na ok. 3.5 realnych sekund)
         
         const attacker = this.player.role === PlayerRole.ATTACKER ? this.player : this.bot;
