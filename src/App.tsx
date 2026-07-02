@@ -3,7 +3,7 @@ import { GameState } from './game/Types';
 import { GameWorld } from './game/GameWorld';
 import { Renderer } from './game/Renderer';
 import { loadAssets } from './game/assets';
-import { loadAudio, setBGM, stopBGM, playSFX, setStepSoundActive } from './game/audio';
+import { loadAudio, setBGM, stopBGM, playSFX, setStepSoundActive, unlockAudio } from './game/audio';
 import { updateGameDimensions, ASSET_PATHS } from './game/constants';
 
 const TriangleButton = ({ dir, onDown, onUp, onLeave }: { dir: 'left' | 'right', onDown: () => void, onUp: () => void, onLeave: () => void }) => {
@@ -332,6 +332,7 @@ export default function App() {
   }, []);
 
   const handleRematchClick = () => {
+    unlockAudio(); // Odblokowanie kontekstu audio na iOS/Android w PWA
     playSFX('button_click');
     updateGameState(GameState.REMATCH_LOADING);
     
@@ -349,7 +350,8 @@ export default function App() {
     });
   };
 
-  const handlePlayClick = () => {
+const handlePlayClick = () => {
+    unlockAudio(); // Odblokowanie kontekstu audio na iOS/Android w PWA
     playSFX('button_click');
     updateGameState(GameState.LOADING);
     
@@ -503,7 +505,7 @@ useEffect(() => {
       };
   }, []);
 
-  useEffect(() => {
+useEffect(() => {
       // Start or resume the game loop whenever we enter PLAYING state
       if (gameState === GameState.PLAYING) {
           setBGM('board');
@@ -514,8 +516,6 @@ useEffect(() => {
           lastTimeRef.current = performance.now();
           if (animationRef.current) cancelAnimationFrame(animationRef.current);
           gameLoop(performance.now());
-      } else {
-          stopBGM();
       }
       return () => {
           if (animationRef.current) {

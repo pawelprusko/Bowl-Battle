@@ -37,29 +37,67 @@ function loadSound(id: string, path: string): Promise<void> {
     });
 }
 
+let audioCtx: AudioContext | null = null;
+
+function getAudioContext(): AudioContext | null {
+    if (!audioCtx && typeof window !== 'undefined') {
+        // @ts-ignore
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (AudioContextClass) {
+            audioCtx = new AudioContextClass();
+        }
+    }
+    return audioCtx;
+}
+
+// NOWOŚĆ: Funkcja-klucz dla PWA i urządzeń mobilnych. 
+// Wywołana RAZ wewnątrz obsługi kliknięcia użytkownika, zdejmuje blokadę Safari/Chrome na zawsze.
+export function unlockAudio() {
+    const ctx = getAudioContext();
+    if (ctx && ctx.state === 'suspended') {
+        ctx.resume().catch(e => console.warn("AudioContext unlock failed", e));
+    }
+}
+
 export function playSFX(id: string, volumeScale: number = 1.0) {
     const soundKey = `sfx.${id}`;
     const audio = sounds[soundKey];
     if (audio) {
-        // Clone node so we can play overlapping sounds (e.g. multiple hits)
         const clone = audio.cloneNode() as HTMLAudioElement;
         
-        // Zwiększamy głośność wszystkich nowych i starych dźwięków do poziomu 1.0 (lub prawie 1.0)
         let baseVol = 0.7; 
-        
         if (id === 'special_attack') {
             baseVol = 1.0; 
         } else if (id === 'step') {
-            baseVol = 0.6; // Kroki głośniej (wcześniej 0.15)
+            baseVol = 1.0; 
         } else if (id === 'bounce') {
-            baseVol = 1.0; // Odbicie na pełnej głośności
+            baseVol = 1.0; 
         } else if (id === 'catch') {
-            baseVol = 1.0; // Złapanie piłki na pełnej głośności
+            baseVol = 1.0; 
         } else {
-            baseVol = 0.8; // Przywracamy kick i hit do ich oryginalnej mocy
+            baseVol = 0.8; 
         }
         
         clone.volume = Math.min(1.0, baseVol * volumeScale);
+        
+        if (id === 'special_attack' || id === 'bounce' || id === 'catch') {
+            const ctx = getAudioContext();
+            if (ctx && ctx.state === 'running') { // Sprawdzamy czy jest już odblokowany
+                try {
+                    const source = ctx.createMediaElementSource(clone);
+                    const gainNode = ctx.createGain();
+                    
+                    if (id === 'special_attack') gainNode.gain.value = 2.4;
+                    if (id === 'catch') gainNode.gain.value = 2.4;
+                    if (id === 'bounce') gainNode.gain.value = 2.4;
+                    
+                    source.connect(gainNode);
+                    gainNode.connect(ctx.destination);
+                } catch (e) {
+                    console.warn('Web Audio Node linking bypassed safely', e);
+                }
+            }
+        }
         
         clone.play().catch(e => console.warn('SFX play failed', e));
     }
@@ -67,8 +105,15 @@ export function playSFX(id: string, volumeScale: number = 1.0) {
 
 export function setBGM(type: 'board' | 'scrum' | 'menu' | 'gameover') {
     const soundKey = `bgm.${type}`;
+    
+    // POPRAWKA BOMBODODPORNA: Jeśli dany utwór jest już wybrany jako obecny podkład, 
+    // ale z powodu restrykcji przeglądarki (Autoplay Policy) lub minimalizacji okna jest w stanie wstrzymania (paused),
+    // wymuszamy ponowną próbę odtworzenia (.play()) przy najbliższej interakcji użytkownika!
     if (currentBGMKey === soundKey && currentBGM) {
-        return; // Already playing this bgm
+        if (currentBGM.paused) {
+            currentBGM.play().catch(e => console.warn('BGM autoplay retry failed', e));
+        }
+        return; 
     }
 
     if (currentBGM) {
