@@ -16,6 +16,12 @@ let isStepActive: boolean = false;
 let stepFadeInterval: NodeJS.Timeout | null = null;
 let currentStepVolume: number = 0;
 
+let gruntSource: AudioBufferSourceNode | null = null;
+let gruntGainNode: GainNode | null = null;
+let isGruntActive: boolean = false;
+let gruntFadeInterval: NodeJS.Timeout | null = null;
+let currentGruntVolume: number = 0;
+
 function getAudioContext(): AudioContext | null {
     if (!audioCtx && typeof window !== 'undefined') {
         // @ts-ignore
@@ -208,6 +214,60 @@ export function setStepSoundActive(active: boolean) {
                     stepSource = null;
                 }
                 if (stepFadeInterval) clearInterval(stepFadeInterval);
+            }
+        }, 50);
+    }
+}
+export function setGruntSoundActive(active: boolean) {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+
+    if (isGruntActive === active && gruntSource) return;
+    isGruntActive = active;
+
+    if (gruntFadeInterval) clearInterval(gruntFadeInterval);
+
+    if (active) {
+        const buffer = sfxBuffers['sfx.grunt'];
+        if (!buffer) return;
+
+        if (gruntSource) {
+            try { gruntSource.stop(); } catch(e) {}
+        }
+
+        gruntSource = ctx.createBufferSource();
+        gruntSource.buffer = buffer;
+        gruntSource.loop = true;
+
+        if (!gruntGainNode) {
+            gruntGainNode = ctx.createGain();
+            gruntGainNode.connect(ctx.destination);
+        }
+
+        gruntGainNode.gain.value = currentGruntVolume * 5.95; // Podbicie zwiększone o 30%
+
+        gruntSource.connect(gruntGainNode);
+        gruntSource.start(0);
+
+        gruntFadeInterval = setInterval(() => {
+            if (currentGruntVolume < 1.0) {
+                currentGruntVolume = Math.min(1.0, currentGruntVolume + 0.1);
+                if (gruntGainNode) gruntGainNode.gain.value = currentGruntVolume * 5.95;
+            } else {
+                if (gruntFadeInterval) clearInterval(gruntFadeInterval);
+            }
+        }, 50);
+    } else {
+        gruntFadeInterval = setInterval(() => {
+            if (currentGruntVolume > 0) {
+                currentGruntVolume = Math.max(0, currentGruntVolume - 0.1);
+                if (gruntGainNode) gruntGainNode.gain.value = currentGruntVolume * 5.95;
+            } else {
+                if (gruntSource) {
+                    try { gruntSource.stop(); } catch(e) {}
+                    gruntSource = null;
+                }
+                if (gruntFadeInterval) clearInterval(gruntFadeInterval);
             }
         }, 50);
     }

@@ -1,6 +1,6 @@
 import { GAME_WIDTH, GAME_HEIGHT, GROUND_Y, PHYSICS } from './constants';
 import { PlayerRole, GameSubState } from './Types';
-import { playSFX, setBGM, setStepSoundActive } from './audio';
+import { playSFX, setBGM, setStepSoundActive, setGruntSoundActive } from './audio';
 
 export class Vector2 {
     constructor(public x: number, public y: number) {}
@@ -1153,6 +1153,9 @@ update(dt: number) {
         ];
         const shouldPlayStep = (isPlayerRunning || isBotRunning) && validRunningStates.includes(this.subState) && !this.matchFinished;
         setStepSoundActive(shouldPlayStep);
+
+        const shouldPlayGrunt = (isPlayerRunning || isBotRunning) && this.subState === GameSubState.KICKOFF_LAUNCH && !this.matchFinished;
+        setGruntSoundActive(shouldPlayGrunt);
     }
     
    updateBot(dt: number) {
