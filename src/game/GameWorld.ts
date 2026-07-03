@@ -744,6 +744,11 @@ update(dt: number) {
                  this.bot.dirX = 0;
                  this.player.vel.x = 0;
                  this.bot.vel.x = 0;
+                 
+                 if (this.freeBallTimer === 0) {
+                     playSFX('whistle');
+                 }
+                 
                  this.freeBallTimer += dt;
                  
                  if (this.freeBallTimer > 1.0) {
@@ -1538,6 +1543,7 @@ scoreTouchdown(player: Player) {
     setupExtraPoint(scoringPlayer: Player) {
         this.subState = GameSubState.KICKING;
         this.ball.onGround = true;
+        playSFX('whistle');
         this.player.role = scoringPlayer === this.player ? PlayerRole.ATTACKER : PlayerRole.DEFENDER;
         this.bot.role = scoringPlayer === this.bot ? PlayerRole.ATTACKER : PlayerRole.DEFENDER;
         

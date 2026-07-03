@@ -140,7 +140,7 @@ export function playSFX(id: string, volumeScale: number = 1.0) {
             boostGain = 2.4; // Wzmocnienie o 240%
         } else if (id === 'step') {
             baseVol = 1.0;
-        } else if (id === 'countdown') {
+        } else if (id === 'countdown' || id === 'whistle') {
             baseVol = 1.0;
             boostGain = 1.5;
         } else {
