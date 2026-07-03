@@ -339,6 +339,7 @@ scrumPromptTimer = 0;
     isPerfectKick = false; // Nowa flaga zapamiętująca czy aktualny lot piłki to udany, wysoki łuk
     
     countdownTimer = 3;
+    lastCountdownSecond = 3;
     
     celebrationMessage = '';
     acquiredMessage: string | null = null;
@@ -437,6 +438,7 @@ this.scrumSpecialTextTimer = 0;
         
 this.subState = GameSubState.COUNTDOWN;
         this.countdownTimer = 3;
+        this.lastCountdownSecond = 3;
 this.isChargingKick = false;
         this.kickPower = 0;
         this.kickDir = 1;
@@ -683,7 +685,18 @@ update(dt: number) {
         }
 
         if (this.subState === GameSubState.COUNTDOWN) {
+            if (this.countdownTimer === 3 && this.lastCountdownSecond === 3) {
+                playSFX('countdown');
+            }
+            
             this.countdownTimer -= dt;
+            
+            const currentSecond = Math.ceil(this.countdownTimer);
+            if (currentSecond < this.lastCountdownSecond && currentSecond > 0) {
+                playSFX('countdown');
+                this.lastCountdownSecond = currentSecond;
+            }
+
             this.ball.updatePhysics(dt, [this.player, this.bot]);
             if (this.countdownTimer <= 0) {
                 this.showPlayerArrow = false; // Strzałka nad graczem znika bezpowrotnie w ułamku sekundy wystrzału piłki

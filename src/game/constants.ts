@@ -42,6 +42,7 @@ export const AUDIO_PATHS = {
         gameover: '/assets/audio/bgm_gameover.mp3'
     },
     sfx: {
+        countdown: '/assets/audio/sfx_countdown.mp3',
         kickoff: '/assets/audio/sfx_kickoff.mp3',
         hit: '/assets/audio/sfx_hit.mp3',
         kick: '/assets/audio/sfx_kick.mp3',
