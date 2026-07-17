@@ -203,12 +203,13 @@ function MatchOverFallback({ onPlay, gameState, loadingProgress, pScore, bScore 
 {gameState === GameState.GAME_OVER && (
                 <div className="absolute z-10 flex flex-col items-center top-[10%]">
                     <h2 className="text-5xl font-black mb-2 drop-shadow-[0_4px_10px_rgba(0,0,0,0.8)] tracking-tight">MATCH OVER</h2>
-                    {/* POPRAWKA: Precyzyjna weryfikacja remisu zgodnie z oczekiwaniami (MATCH IS A DRAW!) */}
+                    
                     <p className="text-2xl drop-shadow-[0_4px_10px_rgba(0,0,0,0.8)] font-bold tracking-wide text-purple-200 uppercase">
-                        {pScore > bScore ? 'PLAYER SaltySam WON!' : pScore < bScore ? 'PLAYER SweatySteve WON!' : "MATCH IS A DRAW!"}
+                        {pScore > 0 ? 'YOU SCORED A TOUCHDOWN' : "YOU DIDN'T SCORE A TOUCHDOWN"}
                     </p>
-                    {/* POPRAWKA ERGONOMII: Zbalansowany badge cyfrowy, który idealnie mieści się nad przyciskiem PLAY AGAIN */}
-                    <p className="text-3xl font-black mt-4 px-6 py-1 bg-black/75 backdrop-blur-md rounded-xl border border-white/10 tracking-widest font-mono text-purple-300 shadow-[0_4px_15px_rgba(168,85,247,0.35)]">
+                    
+                    {/* Tablica ukryta za pomocą klasy hidden – zachowana w strukturze na przyszłość */}
+                    <p className="text-3xl font-black mt-4 px-6 py-1 bg-black/75 backdrop-blur-md rounded-xl border border-white/10 tracking-widest font-mono text-purple-300 shadow-[0_4px_15px_rgba(168,85,247,0.35)] hidden">
                         {pScore} : {bScore}
                     </p>
                 </div>
