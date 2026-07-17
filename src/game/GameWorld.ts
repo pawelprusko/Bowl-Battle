@@ -523,7 +523,8 @@ this.matchFinished = false;
         this.slideJumpTransition = 0;
 this.botAliveTimer = 0;
         this.botSpawnCount = 0;
-        this.botType = 'GROUP'; // POPRAWKA: Pierwsza przeszkoda w meczu to zgodnie z planem GRUPA BOTÓW!
+        this.botType = 'SLIDE'; // Zmieniono na SLIDE zgodnie z nową sekwencją startową (najpierw wślizg)
+        (this as any).spawnHistory = [];
         this.bot.size.set(18, 36);
         this.isGroupQTEActive = false;
         this.teammateActive = false;
@@ -1148,19 +1149,19 @@ if (this.countdownTimer <= 0) {
         }
         
 // POPRAWKA: Włączamy licznik groupTriggerTimer ustawiony na równe 0.2s po tym, jak formacja 3 botów przekroczy skraj planszy!
-        if (this.botType === 'GROUP' && this.subState === GameSubState.REGULAR && !this.isGroupQTEActive && !this.bot.hasHitPlayer && this.player.stunTimer <= 0 && this.bot.pos.x > -100 && this.invincibilityTimer <= 0) {
-            if (this.bot.pos.x + 70 < GAME_WIDTH) {
-                this.groupTriggerTimer += realDt;
-                if (this.groupTriggerTimer >= 0.6) { 
-                    this.isGroupQTEActive = true;
-                    this.groupKickPower = 0;
-                    this.groupKickDir = 1;
-                    this.teammateBotX = GAME_WIDTH / 3 - this.player.size.x / 2; 
-                    this.teammateActive = false; 
-                    playSFX('whistle');
-                }
-            }
+      if (this.botType === 'GROUP' && this.subState === GameSubState.REGULAR && !this.isGroupQTEActive && !this.bot.hasHitPlayer && this.player.stunTimer <= 0 && this.bot.pos.x > -100 && this.invincibilityTimer <= 0) {
+    if (this.bot.pos.x + 70 < GAME_WIDTH) {
+        this.groupTriggerTimer += realDt;
+        if (this.groupTriggerTimer >= 0.6) { 
+            this.isGroupQTEActive = true;
+            this.groupKickPower = 0;
+            this.groupKickDir = 1;
+            this.teammateBotX = GAME_WIDTH / 3 - this.player.size.x / 2; 
+            this.teammateActive = false; 
+            // Usunięto odtwarzanie gwizdka sędziego przy inicjacji mechaniki wyrzutu
         }
+    }
+}
         
         // NOWOŚĆ: Kontrola falowania paska podania oraz automatyczna porażka jeśli formacja stratuje gracza
         if (this.isGroupQTEActive) {
@@ -1620,7 +1621,7 @@ if (success) {
 
 updateBot(dt: number) {
         // Blokujemy spawner i despawnujemy boty, jeśli gracz zbliża się horyzontalnie do finałowej strefy touchdownu
-        if ((this as any).finalStretchActive || this.bgScrollX >= this.totalLevelDistance - 900) {
+        if ((this as any).finalStretchActive || this.bgScrollX >= this.totalLevelDistance - 1000) {
             this.bot.pos.set(-1000, -1000);
             this.bot.dirX = 0;
             this.bot.vel.set(0, 0);
@@ -1722,26 +1723,43 @@ if (b.frenzyBotType === 'SLIDE' && !b.isWaitingForScrumRecovery) {
             }
         }
 
-        if (this.botSpawnTimer > 0) {
-            if (!isDropNear) {
-                this.botSpawnTimer -= dt;
-            }
-            this.botAliveTimer = 0;
-            if (this.botSpawnTimer <= 0) {
-                this.botSpawnCount++;
-                
-                // POPRAWKA KOLEJNOŚCI: 1. Grupa Botów (GROUP), 2. Obrońca (SLIDE), 3. Taran (CLINCH)
-                const loopIndex = this.botSpawnCount % 3;
-                if (loopIndex === 1) {
-                    this.botType = 'GROUP';
-                } else if (loopIndex === 2) {
-                    this.botType = 'SLIDE';
-                } else {
-                    this.botType = 'CLINCH';
+  if (this.botSpawnTimer > 0) {
+                if (!isDropNear) {
+                    this.botSpawnTimer -= dt;
                 }
-                
-       // Przypisanie wielkości bazowych (Taran otrzymuje gabaryt 1.7x)
-                if (this.botType === 'CLINCH') {
+                this.botAliveTimer = 0;
+                if (this.botSpawnTimer <= 0) {
+                    this.botSpawnCount++;
+                    
+                    const history: ('SLIDE' | 'CLINCH' | 'GROUP')[] = (this as any).spawnHistory || [];
+                    let nextType: 'SLIDE' | 'CLINCH' | 'GROUP' = 'SLIDE';
+
+                    if (this.botSpawnCount === 1) {
+                        nextType = 'SLIDE';
+                    } else if (this.botSpawnCount === 2) {
+                        nextType = 'CLINCH';
+                    } else if (this.botSpawnCount === 3) {
+                        nextType = 'GROUP';
+                    } else {
+                        const last3 = history.slice(-3);
+                        const allTypes: ('SLIDE' | 'CLINCH' | 'GROUP')[] = ['SLIDE', 'CLINCH', 'GROUP'];
+                        const starvedType = allTypes.find(t => !last3.includes(t));
+
+                        if (starvedType) {
+                            nextType = starvedType;
+                        } else {
+                            const lastType = history[history.length - 1];
+                            const permittedOptions = allTypes.filter(t => t !== lastType);
+                            nextType = permittedOptions[Math.floor(Math.random() * permittedOptions.length)];
+                        }
+                    }
+
+                    history.push(nextType);
+                    (this as any).spawnHistory = history;
+                    this.botType = nextType;
+                    
+           // Przypisanie wielkości bazowych (Taran otrzymuje gabaryt 1.7x)
+                    if (this.botType === 'CLINCH') {
                     this.bot.size.set(18 * 1.7, 36 * 1.7);
                     this.bot.stats.speed = 100;
                 } else if (this.botType === 'GROUP') {
