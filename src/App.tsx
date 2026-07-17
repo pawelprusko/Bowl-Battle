@@ -60,8 +60,9 @@ const TriangleButton = ({ dir, onDown, onUp, onLeave }: { dir: 'left' | 'right',
     );
 };
 
-const ActionButton = ({ text, onDown, onUp, onLeave, isError }: any) => (
+const ActionButton = ({ text, onDown, onUp, onLeave, isError, id }: any) => (
     <div 
+        id={id}
         className="w-[140px] h-[96px] relative cursor-pointer touch-none select-none drop-shadow-xl group"
         onPointerDown={onDown}
         onPointerUp={onUp}
@@ -280,7 +281,7 @@ export default function App() {
   const lastTimeRef = useRef<number>(0);
   const gameStateRef = useRef<GameState>(GameState.SPLASH);
 
-  // HUD State
+// HUD State
   const [hudState, setHudState] = useState({
     time: 45,
     pScore: 0,
@@ -289,7 +290,8 @@ export default function App() {
     playerRole: 'NEUTRAL',
     isExtraPoint: false,
     subState: 'COUNTDOWN',
-    scrumPrompt: null as 'PUSH' | 'HOLD' | null
+    scrumPrompt: null as 'PUSH' | 'HOLD' | null,
+    isSlideJumpActive: false // NOWOŚĆ: Synchronizacja stanu wślizgu
   });
 
   const updateGameState = (newState: GameState) => {
@@ -392,7 +394,7 @@ const startGame = () => {
         worldRef.current.resetToSnap();
         worldRef.current.playerScore = 0;
         worldRef.current.botScore = 0;
-        worldRef.current.timeLeft = 120; // POPRAWKA: Pełne 120 sekund na zegarze przy restarcie z poziomu menu końcowego
+        worldRef.current.timeLeft = 45; // POPRAWKA: Pełne 120 sekund na zegarze przy restarcie z poziomu menu końcowego
     }
     setBGM('board');
   };
@@ -411,6 +413,8 @@ useEffect(() => {
               if (gameStateRef.current === GameState.PLAYING && worldRef.current) {
                   if (worldRef.current.subState === 'SCRUM_MATRIX') {
                       setBGM('scrum');
+                  } else if ((worldRef.current as any).invincibilityTimer > 0) {
+                      setBGM('cheer');
                   } else {
                       setBGM('board');
                   }
@@ -551,6 +555,8 @@ if (typeof navigator !== 'undefined' && navigator.vibrate) {
             if (!worldRef.current) return prev;
             const newTime = Math.ceil(worldRef.current.timeLeft);
             const pRole = worldRef.current.player.role;
+            const currentProgress = (worldRef.current as any).bgScrollX / (worldRef.current as any).totalLevelDistance;
+            
             const newMessage = worldRef.current.acquiredMessage 
                 ? worldRef.current.acquiredMessage
                 : worldRef.current.subState === 'CELEBRATION' || worldRef.current.subState === 'BALL_ACQUIRED'
@@ -561,7 +567,7 @@ if (typeof navigator !== 'undefined' && navigator.vibrate) {
                 ? "KICKOFF!"
                 : "";
                 
-            if (prev.time !== newTime || prev.pScore !== worldRef.current.playerScore || prev.bScore !== worldRef.current.botScore || prev.message !== newMessage || prev.playerRole !== pRole || prev.isExtraPoint !== worldRef.current.isExtraPointAttempt || prev.subState !== worldRef.current.subState || prev.scrumPrompt !== worldRef.current.scrumPrompt) {
+if (prev.time !== newTime || prev.pScore !== worldRef.current.playerScore || prev.bScore !== worldRef.current.botScore || prev.message !== newMessage || prev.playerRole !== pRole || prev.isExtraPoint !== worldRef.current.isExtraPointAttempt || prev.subState !== worldRef.current.subState || prev.scrumPrompt !== worldRef.current.scrumPrompt || prev.isSlideJumpActive !== worldRef.current.isSlideJumpActive || (prev as any).isGroupQTEActive !== (worldRef.current as any).isGroupQTEActive || (prev as any).progress !== currentProgress) {
                 return {
                     time: newTime,
                     pScore: worldRef.current.playerScore,
@@ -570,8 +576,11 @@ if (typeof navigator !== 'undefined' && navigator.vibrate) {
                     playerRole: pRole,
                     isExtraPoint: worldRef.current.isExtraPointAttempt,
                     subState: worldRef.current.subState,
-                    scrumPrompt: worldRef.current.scrumPrompt
-                };
+                    scrumPrompt: worldRef.current.scrumPrompt,
+                    isSlideJumpActive: worldRef.current.isSlideJumpActive,
+                    isGroupQTEActive: (worldRef.current as any).isGroupQTEActive,
+                    progress: currentProgress // Przekazanie aktualnej pozycji kasku na pasku HUD
+                } as any;
             }
             return prev;
         });
@@ -596,11 +605,9 @@ if (typeof navigator !== 'undefined' && navigator.vibrate) {
               if (e.key === 'ArrowRight' || e.key === 'd') worldRef.current.resolveScrumAction(worldRef.current.player, 'HOLD');
               return;
           }
-          if (e.key === 'ArrowLeft' || e.key === 'a') worldRef.current.player.dirX = -1;
-          if (e.key === 'ArrowRight' || e.key === 'd') worldRef.current.player.dirX = 1;
-          if (e.key === ' ' || e.key === 'Enter') {
+          if (e.key === 'ArrowUp' || e.key === 'w' || e.key === ' ') {
               if (e.repeat) return;
-              worldRef.current.playerTackle();
+              worldRef.current.playerJump();
           }
           if (e.key === 'p') worldRef.current.popBall();
           if (e.key === 'Shift') {
@@ -610,12 +617,6 @@ if (typeof navigator !== 'undefined' && navigator.vibrate) {
       };
       const handleKeyUp = (e: KeyboardEvent) => {
           if (!worldRef.current) return;
-          if (e.key === 'ArrowLeft' || e.key === 'a') {
-              if (worldRef.current.player.dirX === -1) worldRef.current.player.dirX = 0;
-          }
-          if (e.key === 'ArrowRight' || e.key === 'd') {
-              if (worldRef.current.player.dirX === 1) worldRef.current.player.dirX = 0;
-          }
           if (e.key === ' ' || e.key === 'Enter') {
               worldRef.current.releaseTackle();
           }
@@ -738,6 +739,25 @@ const handleScrumPush = () => {
                             <div className="absolute inset-0 bg-gradient-to-b from-white/10 to-transparent"></div>
                             {hudState.time}
                         </div>
+{/* Pasek Postępu Planszy */}
+                    <div className="mt-2 w-48 h-3 bg-black/60 rounded-full border border-white/20 shadow-inner relative">
+                        <div 
+                            className="h-full bg-white rounded-full"
+                            style={{ width: `${Math.min(100, Math.max(0, ((hudState as any).progress || 0) * 100))}%` }}
+                        />
+                        <img 
+                            src="/assets/sprites/p1_head.png" 
+                            alt="head" 
+                            className="absolute z-10 object-contain drop-shadow-md"
+                            style={{ 
+                                left: `${Math.min(100, Math.max(0, ((hudState as any).progress || 0) * 100))}%`, 
+                                top: '50%', 
+                                transform: 'translate(-50%, -50%) scale(-1, 1)', 
+                                width: '28px', 
+                                height: '28px' 
+                            }}
+                        />
+                    </div>
                     </div>
                     
                     {/* Bot Side */}
@@ -761,56 +781,85 @@ const handleScrumPush = () => {
                            paddingBottom: 'max(0px, env(safe-area-inset-bottom))'
                        }}
                    >
-  {/* Left Controls */}
+{/* Left Controls */}
                        <div className="flex gap-6 pointer-events-auto translate-y-4">
-                           {hudState.subState === 'SCRUM_MATRIX' ? (
-                               <ActionButton 
-                                   text="PUSH"
-                                   onDown={handleScrumPush}
-                                   onUp={() => {}}
-                                   onLeave={() => {}}
-                                   isError={pushError} // REKORD BŁĘDU DLA PUSH
-                               />
-                           ) : (
-                               <>
-                                   <TriangleButton 
-                                       dir="left"
-                                       onDown={() => handleDirBtn(-1)}
-                                       onUp={() => handleDirBtn(0)}
-                                       onLeave={() => handleDirBtn(0)}
-                                   />
-                                   <TriangleButton 
-                                       dir="right"
-                                       onDown={() => handleDirBtn(1)}
-                                       onUp={() => handleDirBtn(0)}
-                                       onLeave={() => handleDirBtn(0)}
-                                   />
-                               </>
-                           )}
+                           {/* Lewa strona czysta - brak wirtualnych przycisków kierunkowych */}
                        </div>
                        
 {/* Right Controls */}
                        <div className="flex gap-4 pointer-events-auto items-end translate-y-4">
                            {hudState.subState === 'SCRUM_MATRIX' && !hudState.isExtraPoint ? (
+                               /* Centralny przycisk PUSH pojawia się po prawej stronie do szybkiego mashingu tarana! */
                                <ActionButton 
-                                   text="HOLD"
-                                   onDown={handleScrumHold}
+                                   text="PUSH"
+                                   onDown={handleScrumPush}
                                    onUp={() => {}}
                                    onLeave={() => {}}
-                                   isError={holdError} // REKORD BŁĘDU DLA HOLD
+                                   isError={pushError}
                                />
+) : (hudState as any).isGroupQTEActive ? (
+                               /* POPRAWKA: Zmieniono nazwę wirtualnego przycisku z KICK na THROW (Rzut) z zachowaniem tej samej, perfekcyjnej pozycji w prawym rogu interfejsu React! */
+                               <div className="flex items-center gap-2 animate-fade-in absolute right-4">
+                                   <style>{`
+                                       @keyframes horizontal-pointing-bounce {
+                                           0%, 100% { transform: translateX(0); }
+                                           50% { transform: translateX(-6px); }
+                                       }
+                                   `}</style>
+                                   <div style={{ animation: 'horizontal-pointing-bounce 0.5s infinite ease-in-out' }} className="mr-1 translate-y-[-8px]">
+                                       <svg viewBox="-40 -30 80 60" className="w-[45px] h-[35px] overflow-visible drop-shadow-md">
+                                           <path 
+                                               d="M -35 -12 L 0 -12 L 0 -26 L 32 0 L 0 26 L 0 12 L -35 12 Z" 
+                                               fill="#AF5BF4" 
+                                               stroke="#fff" 
+                                               strokeWidth="6" 
+                                               strokeLinejoin="round" 
+                                           />
+                                       </svg>
+                                   </div>
+                                   <ActionButton 
+                                       text="THROW"
+                                       onDown={() => { if (worldRef.current) (worldRef.current as any).handleGroupKickPress(); }}
+                                   />
+                               </div>
                            ) : (
                                <>
                                    {hudState.isExtraPoint && hudState.playerRole === 'ATTACKER' && (
-                                       /* POPRAWKA BOMBODODPORNA: Ponieważ pasek wykopu leci automatycznie od pierwszej sekundy, 
-                                          przycisk wymaga jedynie pojedynczego, intencjonalnego tapnięcia (onDown). 
-                                          Usunięcie obsługi onUp i onLeave całkowicie eliminuje problem samoczynnych wykopów 
-                                          spowodowanych ześlizgnięciem się palca lub fałszywym stanem hover na desktopie/mobile! */
                                        <ActionButton 
                                            text="KICK"
                                            onDown={handleKickPress}
                                        />
                                    )}
+                                   
+                                   {/* Płynne, kinowe wsuwanie i wysuwanie zestawu JUMP wraz ze strzałką celującą (Scale + Fade + Slide) */}
+                                   <div className={`flex items-center gap-2 transition-all duration-200 ${hudState.isSlideJumpActive ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-6 scale-90 pointer-events-none absolute right-4'}`}>
+                                       <style>{`
+                                           @keyframes horizontal-pointing-bounce {
+                                               0%, 100% { transform: translateX(0); }
+                                               50% { transform: translateX(-6px); }
+                                           }
+                                       `}</style>
+                                       
+                                       {/* Strzałka celująca pomniejszona o 30% z dynamicznym poziomym bouncingiem w lewo i idealnym wyśrodkowaniem pionowym 3D */}
+                                       <div style={{ animation: 'horizontal-pointing-bounce 0.5s infinite ease-in-out' }} className="mr-1 translate-y-[-8px]">
+                                           <svg viewBox="-40 -30 80 60" className="w-[45px] h-[35px] overflow-visible drop-shadow-md">
+                                               <path 
+                                                   d="M -35 -12 L 0 -12 L 0 -26 L 32 0 L 0 26 L 0 12 L -35 12 Z" 
+                                                   fill="#AF5BF4" 
+                                                   stroke="#fff" 
+                                                   strokeWidth="6" 
+                                                   strokeLinejoin="round" 
+                                               />
+                                           </svg>
+                                       </div>
+                                       
+                                       <ActionButton 
+                                           text="JUMP"
+                                           onDown={() => { if (worldRef.current) worldRef.current.playerJump(); }}
+                                           onUp={() => {}}
+                                           onLeave={() => {}}
+                                       />
+                                   </div>
                                </>
                            )}
                        </div>

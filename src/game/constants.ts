@@ -22,7 +22,9 @@ export const ASSET_PATHS = {
         bot_arm_back: '/assets/sprites/p2_hand_back.png',
         bot_leg_front: '/assets/sprites/p2_leg_front.png',
         bot_leg_back: '/assets/sprites/p2_leg_back.png',
-        ball: '/assets/sprites/ball.jpg'
+        ball: '/assets/sprites/ball.png',
+        drop_time: '/assets/sprites/drop_time.png',
+        drop_star: '/assets/sprites/drop_star.png'
     },
     backgrounds: {
         arena: '/assets/images/background.jpg'
@@ -39,7 +41,8 @@ export const AUDIO_PATHS = {
         board: '/assets/audio/bgm_board.mp3',
         scrum: '/assets/audio/bgm_scrum.mp3',
         menu: '/assets/audio/bgm_menu.mp3',
-        gameover: '/assets/audio/bgm_gameover.mp3'
+        gameover: '/assets/audio/bgm_gameover.mp3',
+        cheer: '/assets/audio/sfx_cheer.mp3'
     },
     sfx: {
         grunt: '/assets/audio/sfx_grunt.mp3',
@@ -59,7 +62,7 @@ export const AUDIO_PATHS = {
 };
 
 export const PHYSICS = {
-    gravity: 600, // pt per sec^2
+    gravity: 2400, // pt per sec^2
     maxRunSpeed: 160,
     runAcceleration: 640,
     friction: 0.9, // damping

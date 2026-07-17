@@ -1,4 +1,4 @@
-import { GameWorld, PhysicalBody, Player } from './GameWorld';
+import { GameWorld, PhysicalBody, Player, Vector2 } from './GameWorld';
 import { GAME_WIDTH, GAME_HEIGHT, GROUND_Y } from './constants';
 import { getImage, isFallback } from './assets';
 import { GameSubState, PlayerRole } from './Types';
@@ -21,9 +21,17 @@ export class Renderer {
             ctx.canvas.height = GAME_HEIGHT;
             ctx.imageSmoothingEnabled = false; // ensure it stays pixelated if needed
         }
-        const now = Date.now();
+     const now = Date.now();
         
         ctx.save();
+
+ // POPRAWKA BOMBODODPORNA DLA PWA/MOBILE: Wymuszone sprzętowe oczyszczenie rejestrów cieni 
+        // na samym starcie klatki. Gwarantuje, że poświata z HUD nie wycieknie do elementów boiska.
+        ctx.shadowBlur = 0;
+        ctx.shadowColor = 'transparent'; // POPRAWKA: 'transparent' zamiast rgba resetuje bufor sprzętowy GPU na iOS
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+        ctx.globalCompositeOperation = 'source-over';
         
         // Handle Camera zoom and continuous shake
         if (world.cameraZoom > 1.0) {
@@ -43,7 +51,7 @@ export class Renderer {
             ctx.translate((Math.random()-0.5)*mag, (Math.random()-0.5)*mag);
         }
         
-        this.drawStadiumBackground(); // We will implement this
+        this.drawStadiumBackground(world);
         
         // Helper to draw Headball stylized player
 const drawHeadballPlayer = (
@@ -96,22 +104,47 @@ const drawHeadballPlayer = (
                 ctx.rotate(bodyRot);
                 ctx.translate(0, -35 * Math.min(1, stunTimer > 0.3 ? 1 : (stunTimer / 0.3) * 3)); 
             } else if (isTackling) {
-                bodyRot = (Math.PI/8) * (velX >= 0 ? 1 : -1);
+                bodyRot = (-Math.PI/2.2) * (velX >= 0 ? 1 : -1);
                 ctx.rotate(bodyRot);
+                ctx.translate(0, -10); // slightly lift body so it doesn't clip into ground
             }
             
             // Override cx and cy for drawing logic since we already translated
             cx = 0;
             cy = 0;
             
-            if (isDebuff) {
+ if (isDebuff) {
                 ctx.globalAlpha = 0.6;
             }
         
             const runSpeed = isStunned ? 0 : Math.abs(velX);
             const isRunning = runSpeed > 10;
-            const runCycle = isRunning ? now * 0.015 * (runSpeed / 100) : 0;
-            const idleCycle = isRunning ? 0 : now * 0.003;
+            
+            // POPRAWKA: Jeśli rysujemy dużego bota tarana (w > 25), hamujemy ułamkowy licznik cyklu animacji rąk i nóg.
+            // Bot zachowa swoją dużą prędkość poziomą na planszy, ale same kończyny będą poruszać się dostojniej i wolniej!
+let animSpeedDampen = 1.0;
+            if (spritePrefix === 'bot' && w > 25) {
+                animSpeedDampen = 0.30; 
+            }
+            
+            let runCycle = 0;
+            let idleCycle = 0;
+            
+            if (world.isGroupQTEActive) {
+                runCycle = now * 0.002;
+                idleCycle = now * 0.001;
+            } else if (world.newPlayerTransitionTimer > 0) {
+                if (isRunning) {
+                    runCycle = now * 0.002;
+                    idleCycle = 0;
+                } else {
+                    runCycle = 0;
+                    idleCycle = now * 0.001;
+                }
+            } else {
+                runCycle = isRunning ? now * 0.015 * (runSpeed / 100) * animSpeedDampen : 0;
+                idleCycle = isRunning ? 0 : now * 0.003;
+            }
             
             const bounceY = isRunning && !isTackling ? Math.abs(Math.sin(runCycle)) * 12 : Math.sin(idleCycle) * 3;
             
@@ -214,6 +247,17 @@ const drawHeadballPlayer = (
             const headY = cy - 100 + bounceY;
             const headX = cx + (faceDir * 2); 
             let targetHeadRot = -bodyRot * 0.8 * (faceDir < 0 ? -1 : 1);
+            if (isTackling) {
+                // TUTAJSZĄ WARTOŚCIĄ (np. 80, 90, etc.) MOŻESZ MANUALNIE USTAWIAĆ ROTACJĘ GŁOWY PRZY WŚLIZGU:
+                const manualHeadRotationDegrees = 80;
+                
+                // Konwersja na radiany (nie ruszaj tego):
+                const manualRotRads = manualHeadRotationDegrees * (Math.PI / 180);
+                
+                // Przypisanie w odpowiednim kierunku:
+                targetHeadRot = manualRotRads * (faceDir < 0 ? -1 : 1);
+            }
+            
             if (!drawPart(imgHead, headX, headY, 85, targetHeadRot)) {
                 ctx.save();
                 ctx.translate(headX, headY);
@@ -267,73 +311,291 @@ const drawHeadballPlayer = (
         
             ctx.restore();
         };
-
         // Draw Player Shadows
-        const drawPlayerShadow = (p: Player, stunTimer: number) => {
+  const drawPlayerShadow = (p: Player, stunTimer: number) => {
              let isLaying = p.knockbackTimer > 0 || stunTimer > 0;
-             let shadowW = isLaying ? 55 : 30;
-             let shadowH = isLaying ? 12 : 7;
+             let shadowW = 30; // Blokada powiększania: stały, estetyczny rozmiar cienia
+             let shadowH = 7;
              // If jumping, make shadow smaller
              let heightOffGround = Math.max(0, GROUND_Y - (p.pos.y + p.size.y));
              shadowW = Math.max(15, shadowW - heightOffGround / 5);
              shadowH = Math.max(3, shadowH - heightOffGround / 10);
              
-             ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+     ctx.save();
+             ctx.globalCompositeOperation = 'source-over';
+             ctx.shadowBlur = 0;
+             ctx.shadowOffsetX = 0; 
+             ctx.shadowOffsetY = 0; 
+             ctx.shadowColor = 'transparent'; // POPRAWKA: Siłowe odpięcie warstwy cieniowania na smartfonach
+             
+             ctx.fillStyle = 'rgba(0, 0, 0, 0.35)'; // Przyciemniony, prześwitujący cień (zgodnie z prośbą)
              ctx.beginPath();
              ctx.ellipse(p.pos.x + p.size.x/2, GROUND_Y + 6, shadowW, shadowH, 0, 0, Math.PI*2);
              ctx.fill();
+             ctx.restore();
         };
 
-        const botEffectiveStun = world.bot.isWaitingForScrumRecovery ? 1.0 : world.bot.stunTimer;
+ const botEffectiveStun = world.bot.isWaitingForScrumRecovery ? 1.0 : world.bot.stunTimer;
         const pEffectiveStun = world.player.isWaitingForScrumRecovery ? 1.0 : world.player.stunTimer;
         
-        drawPlayerShadow(world.bot, botEffectiveStun);
-        drawPlayerShadow(world.player, pEffectiveStun);
+        // POPRAWKA BOMBODODPORNA: Dodanie weryfikacji współrzędnej Y (> 0) całkowicie eliminuje ghost-cienie ukrytych postaci pod planszą
+if (world.bot.pos.x > -100 && world.bot.pos.x < GAME_WIDTH + 100 && world.bot.pos.y > 0) {
+            drawPlayerShadow(world.bot, botEffectiveStun);
+        }
+        if (world.player.pos.x > -100 && world.player.pos.x < GAME_WIDTH + 100 && world.player.pos.y > 0) {
+            drawPlayerShadow(world.player, pEffectiveStun);
+        }
 
-// Draw Bot
+        // Deklarujemy zmienną bezpiecznie tylko RAZ na samym szczycie
+        const frenzyBots: Player[] = (world as any).frenzyBots || [];
+        for (const fBot of frenzyBots) {
+            if (fBot.pos.x > -100 && fBot.pos.x < GAME_WIDTH + 100 && fBot.pos.y > 0) {
+                const fStun = fBot.isWaitingForScrumRecovery ? 1.0 : fBot.stunTimer;
+                drawPlayerShadow(fBot, fStun);
+            }
+        }
+
+// Rysowanie dynamicznej kolekcji niezależnych botów trybu szału gwiazdki
+        for (const fBot of frenzyBots) {
+            ctx.save();
+            const fDir = fBot.facingX;
+            const fType = fBot.frenzyBotType;
+            const fStun = fBot.isWaitingForScrumRecovery ? 1.0 : fBot.stunTimer;
+            const botFrenzyImg = getImage('sprites.bot');
+
+            if (fBot.isTackling || fBot.isBoosting) {
+                this.drawTrail(fBot, fDir, '#fbc4ab', '#e63946', botFrenzyImg, true, fBot.isTackling);
+            }
+
+     if (fType === 'GROUP') {
+                const sizes = [new Vector2(18, 36), new Vector2(18 * 1.3, 36 * 1.3), new Vector2(18 * 1.15, 36 * 1.15)];
+                const offsetsX = [0, 35, 70];
+                for (let i = 0; i < 3; i++) {
+                    const bx = fBot.pos.x + offsetsX[i];
+                    // POPRAWKA: Dynamicznie uwzględniamy współrzędną pos.y, by cała formacja mogła lecieć w powietrzu
+                    const by = fBot.pos.y + (fBot.size.y - sizes[i].y);
+                    if (botFrenzyImg) {
+                        ctx.save(); ctx.translate(bx + sizes[i].x / 2, by + sizes[i].y / 2); if (fDir < 0) ctx.scale(-1, 1);
+                        ctx.drawImage(botFrenzyImg, -sizes[i].x / 2, -sizes[i].y / 2, sizes[i].x, sizes[i].y); ctx.restore();
+                    } else {
+                        drawHeadballPlayer(bx, by, sizes[i].x, sizes[i].y, '#e63946', '#fbc4ab', fStun, fBot.debuffTimer > 0, fBot.isTackling, false, fDir, fBot.vel.x, fBot.onGround, fBot.vel.y, fBot.knockbackTimer, 'bot');
+                    }
+                }
+            } else {
+                if (botFrenzyImg) {
+                    ctx.save();
+                    let cx = fBot.pos.x + fBot.size.x/2; let cy = fBot.pos.y + fBot.size.y/2;
+                    ctx.translate(cx, cy); if (fDir < 0) ctx.scale(-1, 1);
+                    if (fBot.knockbackTimer > 0) {
+                        let progress = 1.0 - (fBot.knockbackTimer / 0.4);
+                        ctx.rotate(fBot.vel.x < 0 ? -(Math.PI/2) * progress : (Math.PI/2) * progress);
+                    } else if (fStun > 0) {
+                        ctx.rotate(fStun < 0.3 ? (Math.PI/2) * (fStun / 0.3) : Math.PI/2);
+                    } else if (fBot.isTackling) {
+                        ctx.translate(0, fBot.size.y/2 - fBot.size.x/2); ctx.rotate(Math.PI/2);
+                    }
+                    ctx.drawImage(botFrenzyImg, -fBot.size.x/2, -fBot.size.y/2, fBot.size.x, fBot.size.y);
+                    ctx.restore();
+                } else {
+                    drawHeadballPlayer(fBot.pos.x, fBot.pos.y, fBot.size.x, fBot.size.y, '#e63946', '#fbc4ab', fStun, fBot.debuffTimer > 0, fBot.isTackling, false, fDir, fBot.vel.x, fBot.onGround, fBot.vel.y, fBot.knockbackTimer, 'bot');
+                }
+            }
+            ctx.restore();
+        }
+
+        // Draw Bot
         const botDir = world.bot.facingX;
         const botImg = getImage('sprites.bot');
         
-        // POPRAWKA: Renderujemy smugi bota również wtedy, kiedy jego licznik parcia w przód w klinczu jest aktywny
-        if (world.bot.isTackling || world.bot.isBoosting || (world.subState === 'SCRUM_MATRIX' && world.bot.scrumPushTimer > 0)) {
-             this.drawTrail(world.bot, botDir, '#fbc4ab', '#e63946', botImg, world.bot.isBoosting || world.subState === 'SCRUM_MATRIX', world.bot.isTackling);
-        }
-        if (botImg) {
-            ctx.save();
-            let cx = world.bot.pos.x + world.bot.size.x/2;
-            let cy = world.bot.pos.y + world.bot.size.y/2;
-            ctx.translate(cx, cy);
-            if (botDir < 0) ctx.scale(-1, 1);
-            
-            if (world.bot.knockbackTimer > 0) {
-                let progress = 1.0 - (world.bot.knockbackTimer / 0.4);
-                let rot = (Math.PI/2) * progress;
-                ctx.rotate(world.bot.vel.x < 0 ? -rot : rot);
-            } else if (botEffectiveStun > 0) {
-                let rot = Math.PI/2;
-                if (botEffectiveStun < 0.3) rot = (Math.PI/2) * (botEffectiveStun / 0.3);
-                ctx.rotate(rot);
-            } else if (world.bot.isTackling) {
-                ctx.rotate(Math.PI/8);
-            }
-            
-            ctx.drawImage(botImg, -world.bot.size.x/2, -world.bot.size.y/2, world.bot.size.x, world.bot.size.y);
-            ctx.restore();
-        } else {
-            drawHeadballPlayer(world.bot.pos.x, world.bot.pos.y, world.bot.size.x, world.bot.size.y, 
-                '#e63946', '#fbc4ab', botEffectiveStun, world.bot.debuffTimer > 0, 
-                world.bot.isTackling || world.bot.isDiving || world.subState === GameSubState.SCRUM_MATRIX, world.subState === GameSubState.KICKING && world.bot.role === PlayerRole.ATTACKER, botDir, world.bot.vel.x, world.bot.onGround, world.bot.vel.y, world.bot.knockbackTimer, 'bot');
-        }
         ctx.shadowBlur = 0;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+        ctx.shadowColor = 'transparent';
+
+        ctx.save();
+
+        // NOWOŚĆ: Rysowanie grupy 3 botów idących obok siebie, z zachowaniem skali wysokości i tempa biegu
+        if ((world as any).botType === 'GROUP') {
+            const sizes = [
+                new Vector2(18, 36),            // Bot 1: Baza wielkości SLIDE
+                new Vector2(18 * 1.3, 36 * 1.3), // Bot 2: +30% wysokości
+                new Vector2(18 * 1.15, 36 * 1.15) // Bot 3: +15% wysokości
+            ];
+            const offsetsX = [0, 35, 70]; // Rozstawienie poziome formacji obronnej
+            
+            for (let i = 0; i < 3; i++) {
+                const bx = world.bot.pos.x + offsetsX[i];
+                const by = GROUND_Y - sizes[i].y;
+                
+                if (botImg) {
+                    ctx.save();
+                    ctx.translate(bx + sizes[i].x / 2, by + sizes[i].y / 2);
+                    if (botDir < 0) ctx.scale(-1, 1);
+                    ctx.drawImage(botImg, -sizes[i].x / 2, -sizes[i].y / 2, sizes[i].x, sizes[i].y);
+                    ctx.restore();
+                } else {
+                    drawHeadballPlayer(bx, by, sizes[i].x, sizes[i].y, 
+                        '#e63946', '#fbc4ab', botEffectiveStun, world.bot.debuffTimer > 0, 
+                        world.bot.isTackling || world.bot.isDiving, false, botDir, world.bot.vel.x, world.bot.onGround, world.bot.vel.y, world.bot.knockbackTimer, 'bot');
+                }
+            }
+        } else {
+            // Klasyczne renderowanie pojedynczych botów (SLIDE oraz CLINCH)
+            if (world.bot.isTackling || world.bot.isBoosting || (world.subState === 'SCRUM_MATRIX' && world.bot.scrumPushTimer > 0)) {
+                 this.drawTrail(world.bot, botDir, '#fbc4ab', '#e63946', botImg, world.bot.isBoosting || world.subState === 'SCRUM_MATRIX', world.bot.isTackling);
+            }
+            if (botImg) {
+                ctx.save();
+                let cx = world.bot.pos.x + world.bot.size.x/2;
+                let cy = world.bot.pos.y + world.bot.size.y/2;
+                ctx.translate(cx, cy);
+                if (botDir < 0) ctx.scale(-1, 1);
+                
+                if (world.bot.knockbackTimer > 0) {
+                    let progress = 1.0 - (world.bot.knockbackTimer / 0.4);
+                    let rot = (Math.PI/2) * progress;
+                    ctx.rotate(world.bot.vel.x < 0 ? -rot : rot);
+                } else if (botEffectiveStun > 0) {
+                    let rot = Math.PI/2;
+                    if (botEffectiveStun < 0.3) rot = (Math.PI/2) * (botEffectiveStun / 0.3);
+                    ctx.rotate(rot);
+                } else if (world.bot.isTackling) {
+                    ctx.translate(0, world.bot.size.y/2 - world.bot.size.x/2);
+                    ctx.rotate(Math.PI/2);
+                }
+                
+                ctx.drawImage(botImg, -world.bot.size.x/2, -world.bot.size.y/2, world.bot.size.x, world.bot.size.y);
+                ctx.restore();
+            } else {
+                drawHeadballPlayer(world.bot.pos.x, world.bot.pos.y, world.bot.size.x, world.bot.size.y, 
+                    '#e63946', '#fbc4ab', botEffectiveStun, world.bot.debuffTimer > 0, 
+                    world.bot.isTackling || world.bot.isDiving, world.subState === GameSubState.KICKING && world.bot.role === PlayerRole.ATTACKER, botDir, world.bot.vel.x, world.bot.onGround, world.bot.vel.y, world.bot.knockbackTimer, 'bot');
+            }
+        }
         
-  // Draw Player
+        // NOWOŚĆ: Rysowanie tymczasowego czerwonego zawodnika (Receivera) z przerwą za ścianą obrony
+        if ((world as any).teammateActive) {
+            const tx = (world as any).teammateBotX;
+            const ty = GROUND_Y - world.player.size.y;
+            const playerImg = getImage('sprites.player');
+            if (playerImg) {
+                ctx.save();
+                ctx.translate(tx + world.player.size.x / 2, ty + world.player.size.y / 2);
+                ctx.drawImage(playerImg, -world.player.size.x / 2, -world.player.size.y / 2, world.player.size.x, world.player.size.y);
+                ctx.restore();
+            } else {
+                // Rysujemy biegnącego w slow-mo nowego zawodnika (velX = 120)
+                drawHeadballPlayer(tx, ty, world.player.size.x, world.player.size.y, 
+                    '#4361ee', '#ffcab0', 0, false, false, false, 1, 120, true, 0, 0, 'player');
+            }
+        }
+        
+        ctx.restore();
+        
+        // Draw Drops
+        for (const drop of (world as any).drops || []) {
+            if (drop.collected) continue;
+            
+            const dropScreenX = drop.worldX - world.bgScrollX;
+            // Tylko dropy w granicach ekranu rysujemy
+            if (dropScreenX > -100 && dropScreenX < 900) {
+                ctx.save();
+                ctx.translate(dropScreenX + 20, GROUND_Y - 40 + drop.yOff);
+                
+                // Shadow for drop
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+                ctx.beginPath();
+                ctx.ellipse(0, 40 - drop.yOff, 15, 6, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+if (drop.type === 'TIME') {
+                    const img = getImage('sprites.drop_time');
+                    if (img) {
+                        ctx.drawImage(img, -28, -28, 56, 56);
+                    } else {
+                        // Kształt klepsydry
+                        ctx.fillStyle = '#06d6a0'; // green
+                        ctx.beginPath();
+                        ctx.moveTo(-15, -15);
+                        ctx.lineTo(15, -15);
+                        ctx.lineTo(0, 0);
+                        ctx.lineTo(15, 15);
+                        ctx.lineTo(-15, 15);
+                        ctx.lineTo(0, 0);
+                        ctx.closePath();
+                        ctx.fill();
+                        
+                        ctx.fillStyle = 'white';
+                        ctx.font = 'bold 12px "JetBrains Mono"';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('+10s', 0, 4);
+                    }
+} else if (drop.type === 'STAR') {
+                    const img = getImage('sprites.drop_star');
+                    if (img) {
+                        ctx.drawImage(img, -28, -28, 56, 56);
+                    } else {
+                        // Kształt gwiazdy
+                        ctx.fillStyle = '#ffd166'; // gold
+                        ctx.beginPath();
+                        for (let i = 0; i < 5; i++) {
+                            ctx.lineTo(Math.cos( (18 + i * 72) * Math.PI / 180 ) * 20,
+                                       -Math.sin( (18 + i * 72) * Math.PI / 180 ) * 20);
+                            ctx.lineTo(Math.cos( (54 + i * 72) * Math.PI / 180 ) * 10,
+                                       -Math.sin( (54 + i * 72) * Math.PI / 180 ) * 10);
+                        }
+                        ctx.closePath();
+                        ctx.fill();
+                    }
+                }
+                ctx.restore();
+            }
+        }
+
+// Draw Player
         const pDir = world.player.facingX;
         const playerImg = getImage('sprites.player');
         
+        // NOWOŚĆ: Aplikacja mignięcia starej postaci po udanym przekazaniu piłki
+        if ((world as any).oldPlayerDisappearTimer > 0) {
+            ctx.globalAlpha = (Math.floor(now / 100) % 2 === 0) ? 0.2 : 0.9;
+        }
+        
+        // POPRAWKA BOMBODODPORNA: Siłowo oczyszczamy rejestry cieni GPU przed renderem gracza
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+        ctx.shadowColor = 'transparent';
+
         // POPRAWKA: Renderujemy smugi gracza również wtedy, kiedy jego licznik parcia w przód w klinczu jest aktywny
         if (world.player.isTackling || world.player.isBoosting || (world.subState === 'SCRUM_MATRIX' && world.player.scrumPushTimer > 0)) {
              this.drawTrail(world.player, pDir, '#ffcab0', '#4361ee', playerImg, world.player.isBoosting || world.subState === 'SCRUM_MATRIX', world.player.isTackling);
         }
+let simulatedVelX = world.player.vel.x;
+        if (world.subState === GameSubState.REGULAR && world.isScrolling) {
+            simulatedVelX = (world as any).invincibilityTimer > 0 ? 240 : 120; // Przyspieszony bieg gdy invincibility
+        }
+        
+        // Aura invincibility (Star powerup)
+        if ((world as any).invincibilityTimer > 0 && world.subState === GameSubState.REGULAR) {
+            ctx.save();
+            ctx.shadowBlur = 30;
+            ctx.shadowColor = '#ffd166';
+            ctx.fillStyle = 'rgba(255, 209, 102, 0.4)';
+            ctx.beginPath();
+            ctx.ellipse(world.player.pos.x + world.player.size.x/2, world.player.pos.y + world.player.size.y/2, world.player.size.x * 0.8, world.player.size.y * 0.8, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+            
+            // Wymuszone silniejsze smugi
+            this.drawTrail(world.player, pDir, '#ffcab0', '#ffd166', playerImg, true, true);
+        }
+        
+        // Blink if stunned
+        if (pEffectiveStun > 0) {
+            ctx.globalAlpha = (Math.floor(now / 150) % 2 === 0) ? 0.3 : 1.0;
+        }
+
         if (playerImg) {
             ctx.save();
             let cx = world.player.pos.x + world.player.size.x/2;
@@ -349,67 +611,145 @@ const drawHeadballPlayer = (
                 let rot = Math.PI/2;
                 if (pEffectiveStun < 0.3) rot = (Math.PI/2) * (pEffectiveStun / 0.3);
                 ctx.rotate(rot);
+                ctx.translate(0, world.player.size.x/2); // Adjust position when rotated
             } else if (world.player.isTackling) {
-                ctx.rotate(Math.PI/8);
+                ctx.translate(0, world.player.size.y/2 - world.player.size.x/2);
+                ctx.rotate(-Math.PI/2);
+            }
+            
+            // To animate the image bouncing while running
+            if (world.subState === GameSubState.REGULAR && world.isScrolling && pEffectiveStun <= 0) {
+                const runCycle = now * 0.015 * (160 / 100);
+                const bounceY = Math.abs(Math.sin(runCycle)) * 12;
+                ctx.translate(0, -bounceY * 0.5);
             }
             
             ctx.drawImage(playerImg, -world.player.size.x/2, -world.player.size.y/2, world.player.size.x, world.player.size.y);
             ctx.restore();
-        } else {
+} else {
+            // POPRAWKA: Usunięto flagę SCRUM_MATRIX z warunków tackle gracza – Sam stoi prosto przez cały klincz!
             drawHeadballPlayer(world.player.pos.x, world.player.pos.y, world.player.size.x, world.player.size.y, 
                 '#4361ee', '#ffcab0', pEffectiveStun, world.player.debuffTimer > 0, 
-                world.player.isTackling || world.player.isDiving || world.subState === GameSubState.SCRUM_MATRIX, world.subState === GameSubState.KICKING && world.player.role === PlayerRole.ATTACKER, 
-                pDir, world.player.vel.x, world.player.onGround, world.player.vel.y, world.player.knockbackTimer, 'player');
+                world.player.isTackling || world.player.isDiving, world.subState === GameSubState.KICKING && world.player.role === PlayerRole.ATTACKER, 
+                pDir, simulatedVelX, world.player.onGround, world.player.vel.y, world.player.knockbackTimer, 'player');
         }
-        ctx.shadowBlur = 0;
+        
+        ctx.globalAlpha = 1.0;
+         
 
-        // Draw Ball Shadow
-        const isBallHeld = world.subState === GameSubState.REGULAR || world.subState === GameSubState.KICKING || world.subState === GameSubState.BALL_ACQUIRED || world.subState === GameSubState.SCRUM_MATRIX || world.subState === GameSubState.TACKLE_RESOLVE;
-
-        if (!isBallHeld) {
-             let heightOffGround = Math.max(0, GROUND_Y - (world.ball.pos.y + world.ball.size.y));
-             let shadowW = Math.max(12, 22 - (heightOffGround / 20));
-             ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
-             ctx.beginPath();
-             ctx.ellipse(world.ball.pos.x + world.ball.size.x/2, GROUND_Y - 2, shadowW, shadowW/3, 0, 0, Math.PI*2);
-             ctx.fill();
+      // Draw Ball Shadow
+        let isBallHeld = (world.subState === GameSubState.REGULAR || world.subState === GameSubState.COUNTDOWN || world.subState === GameSubState.KICKING || world.subState === GameSubState.BALL_ACQUIRED || world.subState === GameSubState.SCRUM_MATRIX || world.subState === GameSubState.TACKLE_RESOLVE) && world.newPlayerTransitionTimer <= 0;
+        
+        const attacker = world.player.role === PlayerRole.ATTACKER ? world.player : world.bot;
+        if (attacker.stunTimer > 0) {
+            isBallHeld = false;
         }
 
-        // Draw Ball
+        // ABSOLUTE FORCE for COUNTDOWN to prevent shadow bug
+        if (world.subState === GameSubState.COUNTDOWN) {
+            isBallHeld = true;
+        }
+
+    // Show ball
+    if (!isBallHeld && world.ball.pos.y + world.ball.size.y <= GROUND_Y) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+        ctx.beginPath();
+        const shadowX = world.ball.pos.x + world.ball.size.x / 2;
+        const shadowY = GROUND_Y + 6;
+        const height = Math.max(0, GROUND_Y - (world.ball.pos.y + world.ball.size.y));
+        const shadowW = Math.max(world.ball.size.x * 0.3, world.ball.size.x * 0.7 - height * 0.05);
+        const shadowH = Math.max(world.ball.size.y * 0.15, world.ball.size.y * 0.35 - height * 0.02);
+        ctx.ellipse(shadowX, shadowY, shadowW, shadowH, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+        
+    // Draw Ball
         let ballVisX = world.ball.pos.x;
         let ballVisY = world.ball.pos.y;
-        let ballSpin = world.ball.vel.x !== 0 ? (now / 100) * (world.ball.vel.x > 0 ? 1 : -1) : 0;
+        
+        let ballSpin = 0;
+        if (!isBallHeld) {
+            if (world.newPlayerTransitionTimer > 0) {
+                const totalTime = 3.0;
+                let progress = 1.0 - (Math.max(0, world.newPlayerTransitionTimer) / totalTime);
+                if (progress > 1) progress = 1;
+                ballSpin = (progress - 0.5) * (Math.PI * 0.5);
+            } else if (!world.ball.onGround && (world.ball.vel.x !== 0 || world.ball.vel.y !== 0)) {
+                ballSpin = Math.atan2(world.ball.vel.y, world.ball.vel.x);
+            } else if (world.ball.vel.x !== 0) {
+                ballSpin = (now / 100) * (world.ball.vel.x > 0 ? 1 : -1);
+            }
+        }
         
         if (isBallHeld) {
-            const attacker = world.player.role === PlayerRole.ATTACKER ? world.player : world.bot;
+            const faceDir = attacker.facingX;
+            
+            // TUTAJSZYMI WARTOŚCIAMI MOŻESZ MANUALNIE PRZESUWAĆ PIŁKĘ W RĘKACH:
+            // offset X (przód/tył). Im więcej tym bardziej do przodu
+            const manualBallOffsetX = 15; 
+            // offset Y (góra/dół). Mniej (ujemne) to wyżej.
+            const manualBallOffsetY = -10; 
+            
+            ballVisX = attacker.pos.x + attacker.size.x/2 + (faceDir * manualBallOffsetX) - world.ball.size.x/2;
+            ballVisY = attacker.pos.y + attacker.size.y/2 + manualBallOffsetY - world.ball.size.y/2;
             
             if (world.subState === GameSubState.SCRUM_MATRIX) {
-                const faceDir = attacker.facingX;
                 // SCRUM lean offset
                 ballVisX += faceDir * 10;
                 ballVisY += 10;
+                const runCycle = now * 0.002;
+                const bounceY = Math.abs(Math.sin(runCycle)) * 12;
+                ballVisY += bounceY * 0.8;
             } else if (attacker.onGround) {
-                const runSpeed = Math.abs(attacker.vel.x);
+                const simulatedAttackerVelX = (world.subState === GameSubState.REGULAR && world.isScrolling && attacker.stunTimer <= 0) ? 120 : attacker.vel.x;
+                const runSpeed = Math.abs(simulatedAttackerVelX);
                 const isRunning = runSpeed > 10;
-                const runCycle = isRunning ? now * 0.015 * (runSpeed / 100) : 0;
-                const idleCycle = isRunning ? 0 : now * 0.003;
+                
+                let runCycle = 0;
+                let idleCycle = 0;
+                
+                if (world.isGroupQTEActive) {
+                    runCycle = now * 0.002;
+                    idleCycle = now * 0.001;
+                } else if (world.newPlayerTransitionTimer > 0) {
+                    if (isRunning) {
+                        runCycle = now * 0.002;
+                        idleCycle = 0;
+                    } else {
+                        runCycle = 0;
+                        idleCycle = now * 0.001;
+                    }
+                } else {
+                    runCycle = isRunning ? now * 0.015 * (runSpeed / 100) : 0;
+                    idleCycle = isRunning ? 0 : now * 0.003;
+                }
+                
                 const bounceY = isRunning ? Math.abs(Math.sin(runCycle)) * 12 : Math.sin(idleCycle) * 3;
                 ballVisY += bounceY * 0.8; // Torso bounce offset
             }
             ballSpin = 0; // Don't spin when held
         }
 
-const ballImg = getImage('sprites.ball');
+        // POPRAWKA KORONNA: To to miejsce powodowało wybielenie piłki i przeskakiwanie cienia!
+        // Wyłączamy sprzętowy cień bezpośrednio przed przejściem do sekcji rysowania / wypełniania kolorem piłki.
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+        ctx.shadowColor = 'transparent';
+
+        const ballImg = getImage('sprites.ball');
         
         // Aktywacja neonowej poświaty wokół tekstury lub kształtu piłki na bazie koloru ognia
-        if (world.ball.flameColor !== 'NONE') {
+        if (world.ball.flameColor !== 'NONE' && !world.isExtraPointAttempt) {
             ctx.save();
             ctx.shadowBlur = 25;
             ctx.shadowColor = world.ball.flameColor === 'PURPLE' ? '#EC0DE3' : '#6BBED9';
         }
 
         if (ballImg) {
-             ctx.drawImage(ballImg, ballVisX, ballVisY, world.ball.size.x, world.ball.size.y);
+             ctx.save(); ctx.translate(ballVisX + world.ball.size.x/2, ballVisY + world.ball.size.y/2); ctx.rotate(ballSpin); ctx.drawImage(ballImg, -world.ball.size.x/2, -world.ball.size.y/2, world.ball.size.x, world.ball.size.y); ctx.restore();
         } else {
              ctx.save();
              ctx.translate(ballVisX + world.ball.size.x/2, ballVisY + world.ball.size.y/2);
@@ -432,7 +772,13 @@ const ballImg = getImage('sprites.ball');
              ctx.restore();
         }
 
-        if (world.ball.flameColor !== 'NONE') {
+   if (world.ball.flameColor !== 'NONE' && !world.isExtraPointAttempt) {
+            // POPRAWKA BOMBODODPORNA: Czyścimy rejestry ognia komety przed przywróceniem stanu,
+            // dzięki czemu rozświetlenie nie ma prawa przeskoczyć na żaden inny element w kolejnej klatce.
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+            ctx.shadowColor = 'transparent';
             ctx.restore();
         }
 
@@ -442,15 +788,23 @@ const ballImg = getImage('sprites.ball');
                             p.type === 'perfect' ? '#2ec4b6' : 
                             p.type === 'miss' ? '#e63946' : 
                             p.type === 'flame_purple' ? '#EC0DE3' : 
-                            p.type === 'flame_blue' ? '#6BBED9' : '#fff';
+                            p.type === 'flame_blue' ? '#6BBED9' : 
+                            p.type === 'confetti_green' ? '#4ade80' : 
+                            p.type === 'confetti_red' ? '#f87171' : 
+                            p.type === 'confetti_white' ? '#ffffff' : '#fff';
             ctx.globalAlpha = Math.min(1, p.life * 2);
             
-            if (p.type === 'touchdown' || p.type === 'fieldgoal' || p.type === 'perfect') {
+if (p.type === 'touchdown' || p.type === 'fieldgoal' || p.type === 'perfect') {
                  // Confetti
                  ctx.save();
                  ctx.translate(p.pos.x, p.pos.y);
                  ctx.rotate(p.life * 10);
-                 ctx.fillRect(-4, -4, 8, 8);
+                 
+                 // POPRAWKA: Jeśli cząsteczka ma flagę isBigConfetti, rysujemy ją 2x większą (16x16px zamiast bazy 8x8px)
+                 // @ts-ignore
+                 const size = p.isBigConfetti ? 16 : 8;
+                 ctx.fillRect(-size / 2, -size / 2, size, size);
+                 
                  ctx.restore();
             } else {
                  ctx.beginPath();
@@ -458,6 +812,22 @@ const ballImg = getImage('sprites.ball');
                  ctx.fill();
             }
             ctx.globalAlpha = 1.0;
+        }
+
+        // Wyświetlanie modyfikatora czasu (+5s / -5s) nad graczem
+        const timeWorld = world as any;
+        if (timeWorld.timeModifierTimer > 0 && timeWorld.timeModifierMessage) {
+            ctx.save();
+            ctx.fillStyle = timeWorld.timeModifierColor;
+            ctx.font = 'bold 36px Impact, sans-serif';
+            ctx.textAlign = 'center';
+            // Unosi się do góry w czasie trwania
+            const floatY = timeWorld.timeModifierPlayerY - 40 - ((2.0 - timeWorld.timeModifierTimer) * 30);
+            ctx.globalAlpha = Math.min(1.0, timeWorld.timeModifierTimer);
+            ctx.fillText(timeWorld.timeModifierMessage, world.player.pos.x + world.player.size.x / 2, floatY);
+            
+
+            ctx.restore();
         }
 
         // TACKLE Telegraphs
@@ -474,8 +844,57 @@ const ballImg = getImage('sprites.ball');
             ctx.fillText("TACKLE", world.bot.pos.x + world.bot.size.x/2, world.bot.pos.y - 20);
         }
 
-    // --- END CAMERA TRANSFORM ---
+// --- END CAMERA TRANSFORM ---
         ctx.restore();
+        
+// ========================================================================
+        // POPRAWKA: ZUNIFIKOWANE PASY KINOWE, LINIE PRĘDKOŚCI ORAZ PASEK POSTĘPU TUG-OF-WAR
+        // ========================================================================
+        const isClinchSubState = world.subState === GameSubState.SCRUM_MATRIX || world.scrumSlowMoTimer > 0;
+        if (world.slideJumpTransition > 0 || isClinchSubState) {
+            ctx.save();
+            const barFactor = isClinchSubState ? 1 : world.slideJumpTransition;
+            const barHeight = 85 * barFactor; 
+            
+            // Czarne pasy filmowe (Letterbox top & bottom) - stale widoczne przez cały klincz!
+            ctx.fillStyle = '#05020d';
+            ctx.fillRect(0, 0, GAME_WIDTH, barHeight);
+            ctx.fillRect(0, GAME_HEIGHT - barHeight, GAME_WIDTH, barHeight);
+            
+            if (isClinchSubState) {
+                // Poziome linie pędu laserowego dla klinczu
+                ctx.globalCompositeOperation = 'lighter';
+                const lineCount = 6;
+                for (let i = 0; i < lineCount; i++) {
+                    const y = barHeight + 25 + (i * (GAME_HEIGHT - barHeight * 2 - 50) / (lineCount - 1));
+                    const direction = (i % 2 === 0) ? 1 : -1;
+                    const speedMultiplier = 3.2 + (i % 3) * 1.5;
+                    const segmentLen = 160 + (i * 45) % 140;
+                    
+                    let x = (now * speedMultiplier * direction) % (GAME_WIDTH + segmentLen * 2);
+                    if (direction === -1) {
+                        x = GAME_WIDTH + segmentLen - ((now * speedMultiplier) % (GAME_WIDTH + segmentLen * 2));
+                    } else {
+                        x = x - segmentLen;
+                    }
+
+                    const streakGrad = ctx.createLinearGradient(x, y, x + segmentLen, y);
+                    streakGrad.addColorStop(0, 'rgba(255, 255, 255, 0)');
+                    streakGrad.addColorStop(0.5, 'rgba(168, 85, 247, 0.45)');
+                    streakGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+                    ctx.strokeStyle = streakGrad;
+                    ctx.lineWidth = 1.5 + (i % 2);
+                    ctx.beginPath();
+                    ctx.moveTo(x, y);
+                    ctx.lineTo(x + segmentLen, y);
+                    ctx.stroke();
+                }
+
+// POPRAWKA: Górna przestrzeń paska kinowego zostaje całkowicie czysta i pozbawiona elementów HUD
+            }
+            ctx.restore();
+        }
         
 // ========================================================================
         // POPRAWKA: KINOWY GRADIENT PIONOWY Z SYMETRYCZNYM WSUWANIEM I WYSUWANIEM (In/Out Smooth Transitions)
@@ -503,8 +922,8 @@ const ballImg = getImage('sprites.ball');
             ctx.fillStyle = linearGrad;
             ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
-            // 2. Płynnie wsuwające i wysuwające się panoramiczne pasy filmowe (Ultra-Letterbox)
-            const barHeight = 55 * combinedFactor;
+  // 2. Płynnie wsuwające i wysuwające się panoramiczne pasy filmowe (Ultra-Letterbox)
+            const barHeight = 85 * combinedFactor; // Przywrócono idealne 85px!
             ctx.fillStyle = '#05020d';
             ctx.fillRect(0, 0, GAME_WIDTH, barHeight);
             ctx.fillRect(0, GAME_HEIGHT - barHeight, GAME_WIDTH, barHeight);
@@ -585,10 +1004,11 @@ const drawStylishText = (text: string, x: number, y: number, fontSize: number, g
             ctx.fillStyle = '#2e1065';
             ctx.fillText(upperText, offsetX, offsetY);
             
-            // Całkowicie wyłączamy rozmycie cienia przed nałożeniem frontu, by zachować idealną ostrość
-            ctx.shadowColor = 'transparent';
-            ctx.shadowBlur = 0;
+   // Całkowicie wyłączamy rozmycie cienia przed nałożeniem frontu, by zachować idealną ostrość
+            ctx.shadowBlur = 0; 
+            ctx.shadowOffsetX = 0;
             ctx.shadowOffsetY = 0;
+            ctx.shadowColor = 'transparent'; // POPRAWKA: Zmiana na transparent odcina wycieki z napisów HUD
             
             // NOWY ULTRA-JASNY GRADIENT (Zgodny z Twoim screenem): 
             // Górna połowa litery lśni jasną bielą i pastelowym fioletem, dolna schodzi do żywego, nasyconego fioletu.
@@ -612,125 +1032,142 @@ const drawStylishText = (text: string, x: number, y: number, fontSize: number, g
 
 const fioletColors = ['#d8b4fe', '#a855f7', '#7e22ce', '#3b0764'];
 
-// Draw Scrum PUSH/HOLD Prompts & Special Attack Overrides
+// Draw Scrum PUSH / JUMP / KICK Prompts
         if (world.subState === GameSubState.SCRUM_MATRIX) {
-            // POPRAWKA UX: Jeśli trwa uderzenie specjalne lub odliczanie tekstu, w to samo miejsce
-            // (identyczna skala, pozycja i czcionka) wchodzi soczysty napis SPECIAL ATTACK!
             if (world.scrumSpecialTextTimer > 0 || world.scrumSpecialSlowMoTimer > 0) {
-                 const scale = 1.1 + Math.sin(now / 100) * 0.06; // Ekstra dynamiczny bounce dla atutu
+                 const scale = 1.1 + Math.sin(now / 100) * 0.06;
                  ctx.save();
                  ctx.translate(GAME_WIDTH / 2, 160);
                  ctx.scale(scale, scale);
                  drawStylishText("SPECIAL ATTACK!", 0, 0, 35, fioletColors); 
                  ctx.restore();
             } else if (world.scrumPrompt) {
-                 const scale = 1.0 + Math.sin(now / 180) * 0.05; // Standardowy bounce
+                 const scale = 1.0 + Math.sin(now / 180) * 0.05;
                  ctx.save();
                  ctx.translate(GAME_WIDTH / 2, 160);
                  ctx.scale(scale, scale);
-                 drawStylishText("PRESS " + world.scrumPrompt + "!", 0, 0, 35, fioletColors); 
+                 drawStylishText("MASH PUSH!", 0, 0, 35, fioletColors); 
                  ctx.restore();
             }
-
-      // ========================================================================
-            // REWOLUCJA: ULTRA-PŁYNNY SZKLANY PASEK Z EFEKTEM SPRĘŻYNOWANIA (Frosted Glass Blur UI)
-            // Podpięto pod macierz transformacji fizycznych sprężyn harmonicznych i wahadła ze świata gry
-            // ========================================================================
+} else if ((world.isSlideJumpActive || world.slideJumpTransition > 0) && world.invincibilityTimer <= 0) {
+            const scale = 1.0 + Math.sin(now / 180) * 0.05;
             ctx.save();
-            const barW = 340; 
-            const barH = 24;  
-            const barX = GAME_WIDTH / 2 - barW / 2;
-            const barY = GAME_HEIGHT - 48 - barH / 2; 
+            ctx.translate(GAME_WIDTH / 2, 160);
+            ctx.scale(scale, scale);
+            // POPRAWKA: Zmieniono nazwę komunikatu instrukcji na PRESS THROW! (Wciśnij rzut)
+            if (world.botType === 'GROUP') {
+                drawStylishText("PRESS THROW!", 0, 0, 35, fioletColors); 
+            } else if (world.botType === 'SLIDE') {
+                drawStylishText("PRESS JUMP!", 0, 0, 35, fioletColors); 
+            }
+            ctx.restore();
+        }
+        
+        // NOWOŚĆ: Wyświetlanie stylizowanego i ostrygowanego napisu CATCHED! na środku ekranu przez dokładnie 2 sekundy po udanym przechwycie
+        if ((world as any).groupSuccessMessageTimer > 0) {
+            const scale = 1.0 + Math.sin(now / 120) * 0.04;
+            ctx.save();
+            ctx.translate(GAME_WIDTH / 2, 160);
+            ctx.scale(scale, scale);
+            drawStylishText("CATCHED!", 0, 0, 35, fioletColors);
+            ctx.restore();
+        }
 
-            // PRZENIESIENIE ŚRODKA UKŁADU DLA IDEALNEGO WAHADŁA PENDULUM
-            ctx.translate(barX + barW / 2, barY + barH / 2);
-            ctx.rotate(world.scrumBarBounceAngle); // Obrót fizyczny paska
-            // Elastyczne kurczenie i rozciąganie (Squash & Stretch sprężyny pionowej)
-            ctx.scale(1.0 + world.scrumBarBounceY * 0.0018, 1.0 - world.scrumBarBounceY * 0.0012);
-            ctx.translate(-(barX + barW / 2), -(barY + barH / 2));
-
-            // Potężny neonowy cień pod spodem ramy (Identyczny z oryginalnym Splash Screenem)
-            ctx.shadowColor = world.scrumBarErrorTimer > 0 ? 'rgba(239, 68, 68, 0.6)' : 'rgba(168, 85, 247, 0.55)';
-            ctx.shadowBlur = world.scrumBarErrorTimer > 0 ? 22 : 18;
-
-            // RYSOWANIE CONTRU Z EFEKTEM GLASS BLUR (Mleczno-kryształowa powłoka na pustej strefie)
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.11)'; // Jasna, mleczna baza szkła
-            ctx.strokeStyle = '#FFFFFF';                // border-2 border-white
+// NOWOŚĆ: Reużycie ramy paska wykopu jako poziomego wskaźnika QTE podania dla grupy botów na dolnej flance!
+        if ((world as any).isGroupQTEActive) {
+            ctx.save();
+            // POPRAWKA: Pasek postępu zielonej strefy został powiększony o 100% (szerokość 440px zamiast 220px, wysokość 28px zamiast 14px) dla idealnej, klarownej czytelności!
+            const barW = 440; 
+            const barH = 28;  
+            const barX = 24; 
+            const barY = GAME_HEIGHT - 42.5 - barH / 2;
+            
+            // Szklany, mleczny kontener
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.11)';
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
             ctx.lineWidth = 2;
             ctx.beginPath();
-            ctx.roundRect(barX, barY, barW, barH, 8);
-            ctx.fill();
-            
-            // Druga warstwa dająca głębię szklanego neonu
-            ctx.fillStyle = 'rgba(168, 85, 247, 0.18)';
+            ctx.roundRect(barX, barY, barW, barH, 6);
             ctx.fill();
             ctx.stroke();
-
-            ctx.shadowColor = 'transparent'; // Reset cieni dla rysowania postępu
-            ctx.shadowBlur = 0;
-
-            // Przycięcie (Maskowanie zaokrąglonych krawędzi dla płynnego postępu)
+            
             ctx.save();
             ctx.beginPath();
-            ctx.roundRect(barX, barY, barW, barH, 8);
+            ctx.roundRect(barX, barY, barW, barH, 6);
             ctx.clip();
-
-            // WYPELNIENIE: Wybór koloru (Alarmowy czerwony przy błędzie lub głęboki fiolet-950 ładowania)
-            const filledWidth = barW * world.scrumVisualProgress;
-            if (world.scrumBarErrorTimer > 0) {
-                ctx.fillStyle = '#ef4444'; // Soczysty czerwony kolor kary
-                ctx.fillRect(barX, barY, filledWidth, barH);
+            
+            // Reużycie struktury i przedziałów tolerancji kolorów z paska wykopu rzutu wolnego
+            ctx.fillStyle = 'rgba(168, 85, 247, 0.4)';
+            ctx.fillRect(barX, barY, barW, barH);
+            
+   ctx.fillStyle = 'rgba(30, 25, 40, 0.85)'; // Ciemne tło paska (Za wcześnie: 0 - 65%)
+            ctx.fillRect(barX, barY, barW * 0.65, barH);
+            
+            ctx.fillStyle = 'rgba(46, 196, 182, 0.9)'; // Zielony (Idealny punkt podania: 65% - 93%)
+            ctx.fillRect(barX + barW * 0.65, barY, barW * (0.93 - 0.65), barH);
+            
+            ctx.fillStyle = 'rgba(30, 25, 40, 0.85)'; // Ciemne tło paska (Spóźnienie: 93% - 100%)
+            ctx.fillRect(barX + barW * 0.93, barY, barW * (1.0 - 0.93), barH);
+            ctx.restore();
+            
+// Piłka jako wskaźnik pozycji poruszający się horyzontalnie po siatce
+            const markerX = barX + (barW * (world as any).groupKickPower / 100);
+            const ballImg = getImage('sprites.ball');
+            if (ballImg) {
+                // POPRAWKA: Wycentrowano pozycję osi Y (barY - 2), dzięki czemu marker idealnie pokrywa wysokość 28px rury postępu!
+                ctx.drawImage(ballImg, markerX - 24, barY - 2, 48, 32);
             } else {
-                ctx.fillStyle = '#3b0764'; // Klasyczny fiolet-950 z loadera
-                ctx.fillRect(barX, barY, filledWidth, barH);
-
-                // NOWOŚĆ: ŻYJĄCA I FALUJĄCA ENERGIA (Animated Fluid Wave Overlay)
-                // Dodaje płynną, jaśniejszą warstwę mikro-fal, która porusza się w czasie rzeczywistym
-                ctx.fillStyle = 'rgba(168, 85, 247, 0.28)';
-                const waveWobble = Math.sin(now * 0.006) * 6; // Delikatne horyzontalne falowanie energii
-                ctx.fillRect(barX, barY, Math.min(filledWidth, filledWidth + waveWobble), barH);
+                ctx.fillStyle = '#fff';
+                ctx.beginPath(); ctx.arc(markerX, barY + barH / 2, 12, 0, Math.PI * 2); ctx.fill();
             }
+            ctx.restore();
+        }
 
-            // BIEŻĄCY BIAŁY BŁYSK PŁOMIENI WEWNĘTRZNYCH
-            if (world.scrumSpecialFlashTimer > 0) {
-                ctx.fillStyle = `rgba(255, 255, 255, ${world.scrumSpecialFlashTimer})`;
-                ctx.fillRect(barX, barY, barW, barH);
-            }
-            ctx.restore(); // Wyjście z przycięcia maski ramy
+// POPRAWKA UI: Wycięto centralny pasek ładowania Special Attack. W jego miejsce wchodzi zaawansowany pasek przeciągania liny (Tug-of-War) ulokowany po lewej stronie dolnego pasa kinowego!
+        if (world.subState === GameSubState.SCRUM_MATRIX || world.scrumSlowMoTimer > 0) {
+            ctx.save();
+            const barW = 220; 
+            const barH = 14;  
+            const barX = 24; // Lewy margines identyczny z bocznym odsetkiem przycisku
+            const barY = GAME_HEIGHT - 42.5 - barH / 2; // Perfekcyjne wyśrodkowanie w pionie na dolnym pasie 85px
 
-            // ZEWNĘTRZNA FALA UDERZENIOWA (Shockwave Ring) przy 100% energii
-            if (world.scrumSpecialFlashTimer > 0) {
-                ctx.save();
-                ctx.strokeStyle = `rgba(255, 255, 255, ${world.scrumSpecialFlashTimer})`;
-                ctx.lineWidth = 4 * world.scrumSpecialFlashTimer;
-                ctx.shadowColor = '#FFFFFF';
-                ctx.shadowBlur = 22 * world.scrumSpecialFlashTimer;
-                ctx.beginPath();
-                const expansion = (1.0 - world.scrumSpecialFlashTimer) * 7;
-                ctx.roundRect(barX - expansion, barY - expansion, barW + expansion * 2, barH + expansion * 2, 8);
-                ctx.stroke();
-                ctx.restore();
-            }
-
-            // WEKTOROWA IKONA ZŁOTEJ BŁYSKAWICY
-            const centerX = GAME_WIDTH / 2;
-            ctx.fillStyle = world.scrumBarErrorTimer > 0 ? '#FFFFFF' : '#FBBF24'; // Błyskawica bieleje w stanie błędu
+            // Szklana, mleczna rama paska postępu siłowania
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+            ctx.lineWidth = 2;
             ctx.beginPath();
-            ctx.moveTo(centerX - 72, barY + 5);
-            ctx.lineTo(centerX - 81, barY + 13);
-            ctx.lineTo(centerX - 76, barY + 13);
-            ctx.lineTo(centerX - 79, barY + 19);
-            ctx.lineTo(centerX - 68, barY + 11);
-            ctx.lineTo(centerX - 73, barY + 11);
-            ctx.closePath();
+            ctx.roundRect(barX, barY, barW, barH, 6);
             ctx.fill();
-
-            // TEKST LOGISTYCZNY PASKA (Zwiększona stabilność typograficzna)
-            ctx.fillStyle = '#FFFFFF';
-            ctx.font = 'bold 12px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText("SPECIAL ATTACK", centerX + 4, barY + barH / 2);
+            ctx.stroke();
+            
+            // Maska przycinająca zaokrąglenia wnętrza
+            ctx.save();
+            ctx.beginPath();
+            ctx.roundRect(barX, barY, barW, barH, 6);
+            ctx.clip();
+            
+            const pct = world.scrumOffset / world.scrumWinOffset; // Od -1.0 do +1.0
+            const midX = barX + barW / 2;
+            
+            if (pct > 0) {
+                // Gracz zyskuje przewagę -> Wypełnienie seledynowo-zielone w prawo
+                ctx.fillStyle = '#2ec4b6';
+                ctx.fillRect(midX, barY, (pct * barW / 2), barH);
+            } else if (pct < 0) {
+                // Bot zyskuje przewagę -> Wypełnienie czerwone w lewo
+                ctx.fillStyle = '#e63946';
+                ctx.fillRect(midX + (pct * barW / 2), barY, Math.abs(pct * barW / 2), barH);
+            }
+            ctx.restore();
+            
+            // Ostra, biała linia punktu zero (balans idealnego środka)
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            ctx.moveTo(midX, barY - 3);
+            ctx.lineTo(midX, barY + barH + 3);
+            ctx.stroke();
+            
             ctx.restore();
         }
         
@@ -830,7 +1267,7 @@ if (world.acquiredMessage) {
             ctx.restore();
         }
 
-        // RYSOWANIE PIONOWEJ STRZAŁKI WSKAZUJĄCEJ ZAWODNIKA GRACZA (NA START MECZU)
+// RYSOWANIE PIONOWEJ STRZAŁKI WSKAZUJĄCEJ ZAWODNIKA GRACZA (NA START MECZU)
         if (world.showPlayerArrow) {
             ctx.save();
             
@@ -841,24 +1278,54 @@ if (world.acquiredMessage) {
 
             ctx.translate(arrowX, arrowY);
 
-            // Ścieżka wektorowa ostrej strzałki skierowanej grotem idealnie w dół (⬇)
+// Ścieżka wektorowa ostrej strzałki skierowanej grotem idealnie w dół (⬇)
             ctx.beginPath();
             ctx.moveTo(-12, -35); // Lewy górny róg ogona
             ctx.lineTo(-12, 0);   // Spadek ogona do linii grota
             ctx.lineTo(-26, 0);   // Lewe skrzydełko rozszerzenia grota
             ctx.lineTo(0, 26);    // Sam szpiczasty czubek grota wskazujący zawodnika
             ctx.lineTo(26, 0);    // Prawe skrzydełko rozszerzenia grota
-            ctx.lineTo(12, 0);    // Powrót grota do linii ogona
+            ctx.lineTo(12, 0);    // Powrót grota do prawej krawędzi ogona
             ctx.lineTo(12, -35);  // Prawy górny róg ogona
             ctx.closePath();
 
-            // 1. Renderowanie grubego, białego outline'u pod spodem
             ctx.strokeStyle = '#FFFFFF';
             ctx.lineWidth = 7;
             ctx.lineJoin = 'round';
             ctx.stroke();
 
             // 2. Wypełnienie wnętrza fioletem gry (#AF5BF4)
+            ctx.fillStyle = '#AF5BF4';
+            ctx.fill();
+
+            ctx.restore();
+        }
+
+// RYSOWANIE POZIOMEJ FIOLETOWEJ STRZAŁKI FINISZU (NA OSTATNIEJ PROSTEJ)
+        if ((world as any).finalStretchActive && !world.matchFinished) {
+            ctx.save();
+            const bounceX = Math.sin(now * 0.005) * 7;
+            const arrowX = GAME_WIDTH - 85 + bounceX;
+            const arrowY = GROUND_Y - 50; 
+
+            ctx.translate(arrowX, arrowY);
+
+            // Reużycie identycznych wymiarów i proporcji strzałki startowej, skierowanej w prawo (➔)
+            ctx.beginPath();
+            ctx.moveTo(-35, -12);
+            ctx.lineTo(0, -12);
+            ctx.lineTo(0, -26);
+            ctx.lineTo(26, 0);
+            ctx.lineTo(0, 26);
+            ctx.lineTo(0, 12);
+            ctx.lineTo(-35, 12);
+            ctx.closePath();
+
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.lineWidth = 7;
+            ctx.lineJoin = 'round';
+            ctx.stroke();
+
             ctx.fillStyle = '#AF5BF4';
             ctx.fill();
 
@@ -872,18 +1339,10 @@ if (world.acquiredMessage) {
             const kx = GAME_WIDTH / 2 - kw / 2;
             const ky = 140; // moved down, slightly higher than messages at 160
             
-            // Outer shadow
-            ctx.save();
-            ctx.shadowColor = 'rgba(168,85,247,0.4)';
-            ctx.shadowBlur = 15;
-            ctx.shadowOffsetX = 0;
-            ctx.shadowOffsetY = 0;
-            
             // White outline
             ctx.fillStyle = '#fff';
             ctx.roundRect(kx - 2, ky - 2, kw + 4, kh + 4, 8);
             ctx.fill();
-            ctx.restore();
             
             // Inner background mask
             ctx.save();
@@ -891,20 +1350,20 @@ if (world.acquiredMessage) {
             ctx.roundRect(kx, ky, kw, kh, 6);
             ctx.clip();
 
-            // Background (purple-ish like splash screen)
+   // Background (purple-ish like splash screen)
             ctx.fillStyle = 'rgba(168,85,247,0.4)';
             ctx.fillRect(kx, ky, kw, kh);
 
-            // Orange (too early) 0-70
-            ctx.fillStyle = world.isChargingKick ? 'rgba(255, 183, 3, 0.9)' : 'rgba(163, 122, 0, 0.7)'; 
+            // Ciemne tło paska (too early) 0-70
+            ctx.fillStyle = 'rgba(30, 25, 40, 0.85)'; 
             ctx.fillRect(kx, ky, kw * 0.7, kh);
             
             // Green (perfect) 70-90
             ctx.fillStyle = world.isChargingKick ? 'rgba(46, 196, 182, 0.9)' : 'rgba(27, 112, 104, 0.7)';
             ctx.fillRect(kx + kw * 0.7, ky, kw * 0.2, kh);
             
-            // Red (too late) 90-100
-            ctx.fillStyle = world.isChargingKick ? 'rgba(230, 57, 70, 0.9)' : 'rgba(133, 33, 41, 0.7)';
+            // Ciemne tło paska (too late) 90-100
+            ctx.fillStyle = 'rgba(30, 25, 40, 0.85)'; 
             ctx.fillRect(kx + kw * 0.9, ky, kw * 0.1, kh);
             
             ctx.restore(); // remove clip
@@ -928,9 +1387,7 @@ if (world.acquiredMessage) {
                 const markerSize = 32; // w-8 h-8
                 if (ballImg) {
                     ctx.save();
-                    ctx.shadowColor = 'rgba(0,0,0,0.8)';
-                    ctx.shadowBlur = 4;
-                    ctx.shadowOffsetY = 2;
+                    // No shadows here either as requested
                     // Draw ball centered horizontally, resting on the bottom of the bar
                     ctx.drawImage(ballImg, markerX - markerSize / 2, ky + kh - markerSize + 4, markerSize, markerSize);
                     ctx.restore();
@@ -966,10 +1423,6 @@ if (world.acquiredMessage) {
             
             ctx.font = '900 180px "Arial Black", Impact, sans-serif';
             
-            ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
-            ctx.shadowBlur = 25;
-            ctx.shadowOffsetY = 15;
-            
             // Text Stroke (Outline)
             ctx.strokeStyle = '#2e1065';
             ctx.lineWidth = 18;
@@ -982,7 +1435,7 @@ if (world.acquiredMessage) {
             grad.addColorStop(0.6, '#7e22ce'); // purple-700
             grad.addColorStop(1, '#3b0764'); // purple-950
             
-ctx.shadowColor = 'transparent'; // Remove shadow for fill
+ // Remove shadow for fill
             ctx.fillStyle = grad;
             ctx.fillText(count.toString(), 0, 0);
             
@@ -1013,20 +1466,12 @@ ctx.shadowColor = 'transparent'; // Remove shadow for fill
             ctx.fill();
             ctx.restore();
         };
-
-// 1. Jeśli trwa klincz (Scrum) – strzałka pokazuje się TYLKO nad tym buttonem, który trzeba aktualnie kliknąć!
-        // POPRAWKA UX: Strzałki nawigacyjne zostają całkowicie wyłączone i schowane w trakcie trwania widowiskowego Special Attack slow-motion!
-        if (world.subState === GameSubState.SCRUM_MATRIX && world.scrumSpecialSlowMoTimer <= 0 && world.scrumSpecialTextTimer <= 0) {
-            if (world.scrumPrompt === 'PUSH') {
-                drawButtonArrow(94);               // Pokazuje strzałkę wyłącznie nad PUSH (lewy róg)
-            } else if (world.scrumPrompt === 'HOLD') {
-                drawButtonArrow(GAME_WIDTH - 94);  // Pokazuje strzałkę wyłącznie nad HOLD (prawy róg)
-            }
-        }
-        // 2. Jeśli gracz wykonuje rzut wolny (Kick) – pokazujemy strzałkę wyłącznie nad przyciskiem KICK (prawy dół)
+// POPRAWKA: Wyłączono starą Canvasową strzałkę z lewego brzegu ekranu, która wskazywała puste miejsce.
         if (world.isExtraPointAttempt && world.subState === GameSubState.KICKING && world.player.role === PlayerRole.ATTACKER) {
-            drawButtonArrow(GAME_WIDTH - 94);  // Nad przyciskiem KICK
+            drawButtonArrow(GAME_WIDTH - 94);  // Nad przyciskiem KICK wyłącznie podczas wykopu
         }
+
+
 
         ctx.restore();
     }
@@ -1076,7 +1521,7 @@ drawTrail(player: Player, dir: number, skinColor: string, shirtColor: string, im
         ctx.restore();
     }
 
-    drawStadiumBackground() {
+drawStadiumBackground(world: GameWorld) {
         const { ctx } = this;
         
         const arenaImg = getImage('backgrounds.arena');
@@ -1086,9 +1531,21 @@ drawTrail(player: Player, dir: number, skinColor: string, shirtColor: string, im
             const scale = Math.max(GAME_WIDTH / arenaImg.width, GAME_HEIGHT / arenaImg.height);
             const drawW = arenaImg.width * scale;
             const drawH = arenaImg.height * scale;
-            const drawX = (GAME_WIDTH - drawW) / 2;
             const drawY = (GAME_HEIGHT - drawH) / 2;
-            ctx.drawImage(arenaImg, drawX, drawY, drawW, drawH);
+            
+            let offsetX = (world as any).bgScrollX || 0;
+            offsetX = offsetX % drawW;
+            
+            // POPRAWKA: Sprowadzamy pozycje X do liczb całkowitych i dodajemy 1px nakładki szerokości (w).
+            // To całkowicie eliminuje sprzętowy błąd wygładzania krawędzi (subpixel anti-aliasing) w Canvasie!
+            const x1 = Math.floor(-offsetX);
+            const x2 = Math.floor(drawW - offsetX);
+            const w = Math.ceil(drawW) + 1; // 1px naddatku (overlap) gwarantuje idealny szew bez prześwitów
+            
+            // Rysujemy podwójnie z bezpiecznym mikronakładaniem na siebie
+            ctx.drawImage(arenaImg, x1, drawY, w, drawH);
+            ctx.drawImage(arenaImg, x2, drawY, w, drawH);
+            
             ctx.restore();
             return;
         }
@@ -1115,11 +1572,17 @@ drawTrail(player: Player, dir: number, skinColor: string, shirtColor: string, im
         
         // Stadium Lights
         ctx.fillStyle = '#ffffe0';
-        ctx.shadowColor = '#ffffaa';
-        ctx.shadowBlur = 15;
+        if (!world.isExtraPointAttempt) {
+            ctx.shadowColor = '#ffffaa';
+            ctx.shadowBlur = 15;
+        }
         ctx.beginPath(); ctx.arc(GAME_WIDTH * 0.2, 40, 12, 0, Math.PI * 2); ctx.fill();
         ctx.beginPath(); ctx.arc(GAME_WIDTH * 0.8, 40, 12, 0, Math.PI * 2); ctx.fill();
-        ctx.shadowBlur = 0;
+        if (!world.isExtraPointAttempt) {
+            ctx.shadowBlur = 0;
+            ctx.shadowColor = 'rgba(0,0,0,0)';
+        }
+         
         
         // Turf Floor with perspective
         const floorGrad = ctx.createLinearGradient(0, horizon, 0, GAME_HEIGHT);
@@ -1180,8 +1643,15 @@ drawTrail(player: Player, dir: number, skinColor: string, shirtColor: string, im
         const { ctx } = this;
         ctx.strokeStyle = neonColor;
         ctx.lineWidth = 4;
-        ctx.shadowBlur = 10;
-        ctx.shadowColor = neonColor;
+        
+        // Remove shadows for extra point
+        // if (!world.isExtraPointAttempt) { 
+        //   we don't have access to world here, but it's safe to just draw them without glow, 
+        //   or we can skip glow entirely or pass in world.
+        // }
+        // Let's just remove the glow from the goalpost, it was probably causing bleed issues anyway.
+        // ctx.shadowBlur = 10;
+        // ctx.shadowColor = neonColor;
         
         const yTop = yBottom - 80;
         const w = 40;
@@ -1200,6 +1670,33 @@ drawTrail(player: Player, dir: number, skinColor: string, shirtColor: string, im
         ctx.lineTo(xBottom + w, yTop - 60); // Right upright
         ctx.stroke();
         
-        ctx.shadowBlur = 0;
+         
+    }
+   
+    syncHtmlJumpButton(visible: boolean, transition: number) {
+        if (typeof document === 'undefined') return;
+        
+        // Namierzanie bezpośrednio po unikalnym ID kontenera
+        const jumpBtn = document.getElementById('html-jump-button');
+        if (!jumpBtn) return;
+
+        if (visible && transition > 0) {
+            // Przeniesienie przycisku na prawą stronę pasu kinowego
+            jumpBtn.style.setProperty('display', 'block', 'important');
+            jumpBtn.style.position = 'absolute';
+            jumpBtn.style.left = 'auto';
+            jumpBtn.style.right = '24px'; // Margines boczny od prawej krawędzi kadru
+            
+            // Dla pasu 144px i przycisku 96px, dolny margines 24px daje idealne wyśrodkowanie w pionie (24 + 96 + 24 = 144)
+            jumpBtn.style.bottom = `${24 * transition}px`;
+            
+            // Płynne wejście kinowe
+            jumpBtn.style.opacity = `${transition}`;
+            jumpBtn.style.transform = `scale(${transition})`;
+            jumpBtn.style.zIndex = '999';
+        } else {
+            // Całkowite ukrycie i wyczyszczenie cienia podczas normalnego biegu
+            jumpBtn.style.setProperty('display', 'none', 'important');
+        }
     }
 }

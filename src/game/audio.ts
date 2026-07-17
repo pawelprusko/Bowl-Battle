@@ -85,7 +85,7 @@ export function loadAudio(): Promise<void> {
     return Promise.all(promises).then(() => {});
 }
 
-export function setBGM(type: 'board' | 'scrum' | 'menu' | 'gameover') {
+export function setBGM(type: 'board' | 'scrum' | 'menu' | 'gameover' | 'cheer') {
     const soundKey = `bgm.${type}`;
     
     if (currentBGMKey === soundKey && currentBGM) {

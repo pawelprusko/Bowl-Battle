@@ -38,9 +38,12 @@ export class PhysicalBody {
 export class Player extends PhysicalBody {
     role: PlayerRole = PlayerRole.NEUTRAL;
     isBot: boolean = false;
+    ignoreWalls: boolean = false;
     dirX: number = 0; // -1, 0, 1
     facingX: number = 1; // Tracks last movement direction
     isTackling: boolean = false;
+    hasTackled: boolean = false;
+    hasHitPlayer: boolean = false;
     isDiving: boolean = false;
     tackleTimer: number = 0;
     momentum: number = 0;
@@ -107,8 +110,10 @@ if (this.stunTimer > 0 || this.isWaitingForScrumRecovery) {
             }
             this.updatePhysics(dt); // Keep falling/sliding when stunned
             // Wall boundaries
-            if (this.pos.x < 0) { this.pos.x = 0; this.vel.x = 0; }
-            if (this.pos.x > GAME_WIDTH - this.size.x) { this.pos.x = GAME_WIDTH - this.size.x; this.vel.x = 0; }
+            if (!this.ignoreWalls) {
+                if (this.pos.x < 0) { this.pos.x = 0; this.vel.x = 0; }
+                if (this.pos.x > GAME_WIDTH - this.size.x) { this.pos.x = GAME_WIDTH - this.size.x; this.vel.x = 0; }
+            }
             return; // Cannot move
         }
         
@@ -162,21 +167,26 @@ if (this.isRetreating) {
         // już po przebiegnięciu zaledwie 7% szerokości planszy (zamiast dotychczasowych 20%).
         this.isBoosting = this.continuousRunDistance > GAME_WIDTH * 0.06;
         
-        const speedMultiplier = (this.stats.speed / 100);
+     const speedMultiplier = (this.stats.speed / 100);
         const acc = PHYSICS.runAcceleration * speedMultiplier * 1.5; // Slightly faster acceleration
-        let maxS = (this.debuffTimer > 0 ? PHYSICS.maxRunSpeed * 0.5 : PHYSICS.maxRunSpeed) * speedMultiplier * 0.7;
+  let maxS = (this.debuffTimer > 0 ? PHYSICS.maxRunSpeed * 0.5 : PHYSICS.maxRunSpeed) * speedMultiplier * 0.525; // Spowolnione o 25% (0.7 * 0.75)
+        
+        // NOWOŚĆ: Jeśli to taran (bot o zwiększonym gabarycie), biegnie na gracza o 60% szybciej!
+        if (this.isBot && this.size.y > 45) {
+            maxS *= 2.60;
+        }
         
         if (this.isBoosting) {
             maxS *= 2.0;
         }
         
         if (this.isTackling) {
-            maxS = PHYSICS.maxRunSpeed * 3; // Dash speed limit
+            maxS = PHYSICS.maxRunSpeed * 6; // Dash speed limit
         }
         
         if (effectiveDirX !== 0 && this.onGround && !this.isTackling) {
             this.vel.x += effectiveDirX * acc * dt;
-        } else if (this.onGround) {
+        } else if (this.onGround && !this.isTackling) {
             if (this.vel.x > 0) {
                 this.vel.x -= PHYSICS.decay * dt;
                 if (this.vel.x < 0) this.vel.x = 0;
@@ -192,11 +202,17 @@ if (this.isRetreating) {
         this.updatePhysics(dt);
         
         // Usunięto lokalne odtwarzanie kroku - przeniesiono do GameWorld.update
-        
-     // Wall boundaries (Wprowadzenie marginesu 40px od krawędzi ekranu, aby postać nie znikała za ramą)
-        const screenMargin = 40;
-        if (this.pos.x < screenMargin) { this.pos.x = screenMargin; this.vel.x = 0; }
-        if (this.pos.x > GAME_WIDTH - this.size.x - screenMargin) { this.pos.x = GAME_WIDTH - this.size.x - screenMargin; this.vel.x = 0; }
+
+// Wall boundaries (Wprowadzenie marginesu 40px od krawędzi ekranu, aby postać nie znikała za ramą)
+        if (!this.ignoreWalls) {
+            const screenMargin = 40;
+            // POPRAWKA: Bezwzględnie blokujemy jakiekolwiek snapowanie horyzontalne dla postaci ukrytych poza areną. Zapobiega to potykaniu się Sama zaraz po odliczaniu 3,2,1!
+            if (this.pos.x > -500 && this.pos.x < GAME_WIDTH + 500) {
+                if (this.pos.x < screenMargin) { this.pos.x = screenMargin; this.vel.x = 0; }
+                if (this.pos.x > GAME_WIDTH - this.size.x - screenMargin) { this.pos.x = GAME_WIDTH - this.size.x - screenMargin; this.vel.x = 0; }
+            }
+        }
+    
     }
 }
 
@@ -208,7 +224,7 @@ export class Ball extends PhysicalBody {
     
     constructor() {
         super();
-        this.size.set(20, 14); // make ball visible
+        this.size.set(38, 22); // Powiększona x3. Tutaj możesz manualnie zmieniać wymiary!
     }
     
 updatePhysics(dt: number, players: Player[] = []) {
@@ -310,7 +326,12 @@ export class GameWorld {
     ball = new Ball();
     
  subState = GameSubState.COUNTDOWN;
-    timeLeft = 120; // POPRAWKA: Wydłużono bazowy czas rozgrywki do idealnych 120 sekund (2 minuty pełnej akcji!)
+    timeLeft = 45; // 45s
+    totalLevelDistance = 22000;
+    timeModifierMessage: string | null = null;
+    timeModifierTimer = 0;
+    timeModifierColor: string = '#fff';
+    timeModifierPlayerY = 0;
     playerScore = 0;
     botScore = 0;
     
@@ -318,6 +339,36 @@ export class GameWorld {
     cameraZoom = 1.0;
     cameraX = GAME_WIDTH / 2;
     cameraY = GAME_HEIGHT / 2;
+    
+ // Background scroll state
+    bgScrollX = 0;
+    bgScrollSpeed = 225; // Spowolnione o 25% (300 * 0.75) dla lepszej reakcji!
+    
+    // Drops & Powerups
+    drops: { x: number; worldX: number; type: 'TIME' | 'STAR'; yOff: number; time: number; collected: boolean; }[] = [];
+    invincibilityTimer = 0;
+    invincibilityMultiplier = 2.0;
+    
+// Runner state
+    botSpawnTimer = 0;
+    playerFallTimer = 0;
+    isScrolling = false;
+    isSlideJumpActive = false;      // NOWOŚĆ: Stan aktywnego wślizgu bota
+    slideJumpTransition = 0;        // NOWOŚĆ: Płynne wsuwanie czarnych pasków kinowych i buttona
+    botAliveTimer = 0;              // NOWOŚĆ: Czas od pojawienia się bota na planszy
+    botSpawnCount = 0;              // NOWOŚĆ: Licznik zlicza spwany botów do naprzemienności
+    botType: 'SLIDE' | 'CLINCH' | 'GROUP' = 'GROUP'; // POPRAWKA: Typ bota uwzględnia formację GROUP
+    
+// NOWOŚĆ: Zaawansowane stany dla mechaniki grupy botów i podania piłki (Pass QTE)
+    isGroupQTEActive = false;
+    groupKickPower = 0;
+    groupKickDir = 1;
+    groupTriggerTimer = 0;
+    teammateBotX = -1000;
+    teammateActive = false;
+    newPlayerTransitionTimer = 0;
+    oldPlayerDisappearTimer = 0;
+    groupSuccessMessageTimer = 0; // NOWOŚĆ: Licznik wyświetlania stylizowanego napisu CATCHED!
     
     // Scrum State
     scrumTimer = 0;
@@ -362,7 +413,8 @@ freeBallTimer = 0;
     showRunArrow = false; // Flaga dla renderera informująca o rysowaniu strzałki touchdownu
     showPlayerArrow = false; // Flaga dla strzałki wskazującej gracza na samym początku meczu
 scrumSlowMoTimer = 0; // Licznik kontrolujący kinowe, widowiskowe spowolnienie czasu na finiszu walki
-    pendingRunArrow = false; // Nowa flaga oczekiwania na zakończenie slow-motion przed pokazaniem strzałki TD
+    pendingRunArrow = false;
+    pendingScrumTimeModifier = 0; // Nowa flaga oczekiwania na zakończenie slow-motion przed pokazaniem strzałki TD
     kickInputLockout = 0;    // Absolutna blokada chroniąca przed accidental-touch, ghost-clickami lub hoverem z UI
   scrumComboCount = 0;          // Licznik udanych kliknięć z rzędu pod Special Attack (0 do 5)
     scrumSpecialFlashTimer = 0;   // Timer rozbłysku białych płomieni na pasku Special Attack
@@ -414,23 +466,24 @@ this.scrumSpecialTextTimer = 0;
             this.celebrationTimeoutId = null;
         }
         this.ball.ignoreWalls = false;
-        this.player.pos.set(50, GROUND_Y - this.player.size.y);
+        this.ball.flameColor = 'NONE';
+        this.ball.pos.set(GAME_WIDTH / 3 - this.player.size.x / 2, GROUND_Y - this.player.size.y);
+        this.player.pos.set(GAME_WIDTH / 3 - this.player.size.x / 2, GROUND_Y - this.player.size.y);
         this.player.vel.set(0,0);
-        this.player.role = PlayerRole.NEUTRAL;
+        this.player.role = PlayerRole.ATTACKER;
         this.player.stunTimer = 0;
         this.player.isWaitingForScrumRecovery = false;
         this.player.isRetreating = false;
         this.player.isAtRetreatPos = false;
         
-        this.bot.pos.set(GAME_WIDTH - 50 - this.bot.size.x, GROUND_Y - this.bot.size.y);
+        this.bot.pos.set(-1000, -1000);
         this.bot.vel.set(0,0);
-        this.bot.role = PlayerRole.NEUTRAL;
+        this.bot.role = PlayerRole.DEFENDER;
         this.bot.stunTimer = 0;
         this.bot.isWaitingForScrumRecovery = false;
         this.bot.isRetreating = false;
         this.bot.isAtRetreatPos = false;
         
-       this.ball.pos.set(GAME_WIDTH/2 - this.ball.size.x/2, GROUND_Y - this.ball.size.y);
         this.ball.vel.set(0,0);
         this.ball.bounciness = 0.75;
         this.ball.onGround = true;
@@ -439,20 +492,46 @@ this.scrumSpecialTextTimer = 0;
 this.subState = GameSubState.COUNTDOWN;
         this.countdownTimer = 3;
         this.lastCountdownSecond = 3;
-this.isChargingKick = false;
+        this.isChargingKick = false;
         this.kickPower = 0;
+        
+        // Krytyczny reset rejestrów mapy dla procedury PLAY AGAIN
+        this.bgScrollX = 0;
+        (this as any).finalStretchActive = false;
+        
+        this.invincibilityTimer = 0;
+        this.drops = [
+            { worldX: this.totalLevelDistance * 0.25, x: 0, type: 'TIME', yOff: 0, time: Math.random() * 100, collected: false },
+            { worldX: this.totalLevelDistance * 0.40, x: 0, type: 'STAR', yOff: 0, time: Math.random() * 100, collected: false },
+            { worldX: this.totalLevelDistance * 0.50, x: 0, type: 'TIME', yOff: 0, time: Math.random() * 100, collected: false },
+            { worldX: this.totalLevelDistance * 0.75, x: 0, type: 'TIME', yOff: 0, time: Math.random() * 100, collected: false }
+        ];
         this.kickDir = 1;
         this.kickHoldTimer = 0;
 this.isExtraPointAttempt = false;
         this.isPerfectKick = false; // Resetowanie pamięci strzału przy nowej rundzie
 this.showRunArrow = false;  // Schowanie strzałki przy restarcie
         this.pendingRunArrow = false;
+        this.pendingScrumTimeModifier = 0;
         this.kickInputLockout = 0;
 this.matchFinished = false;
         this.matchFreezeTimer = 0;
         this.isWhistlePlayed = false;
         this.pendingAcquiredMessage = null;
         this.botTouchdownDelayTimer = 0;
+  this.isSlideJumpActive = false;
+        this.slideJumpTransition = 0;
+this.botAliveTimer = 0;
+        this.botSpawnCount = 0;
+        this.botType = 'GROUP'; // POPRAWKA: Pierwsza przeszkoda w meczu to zgodnie z planem GRUPA BOTÓW!
+        this.bot.size.set(18, 36);
+        this.isGroupQTEActive = false;
+        this.teammateActive = false;
+        this.teammateBotX = -1000;
+        this.groupTriggerTimer = 0;
+  this.newPlayerTransitionTimer = 0;
+        this.oldPlayerDisappearTimer = 0;
+        this.groupSuccessMessageTimer = 0; // NOWOŚĆ: Reset timera powiadomienia
     }
     
     spawnParticles(x: number, y: number, type: string, count: number = 10) {
@@ -491,26 +570,30 @@ update(dt: number) {
         if (this.subState === GameSubState.SCRUM_MATRIX && this.scrumSpecialSlowMoTimer <= 0) {
             dt *= 0.3;
         }
+        
+        // NOWOŚĆ: Aplikacja kinowego spowolnienia klatek dla fazy celowania podania nad grupą botów
+        if (this.isGroupQTEActive) {
+            dt *= 0.12;
+        }
 
 // ========================================================================
         // POPRAWKA: ULTRA-PŁYNNE ZAKOŃCZENIE PLANSZY (Smooth Match End Transition)
         // Zawodnicy nie przeskakują już skokowo – płynnie odsuwają się od siebie do pozycji pionowej stojącej!
         // ========================================================================
         const isAnimationActive = this.scrumSpecialSlowMoTimer > 0 || this.scrumSlowMoTimer > 0 || this.subState === GameSubState.CELEBRATION;
+// Check for Lose (Time Out) - Win is now handled by reaching the finish arrow
         if (this.timeLeft <= 0 && !isAnimationActive && !this.matchFinished) {
             if (this.subState === GameSubState.SCRUM_MATRIX) {
                 this.subState = GameSubState.REGULAR;
-                // Wykorzystujemy punkt zderzenia klinczu jako kotwicę do płynnego rozsunięcia
             } else {
-                // Jeśli byli na otwartej planszy, zapisujemy ich obecny środek geometryczny
                 this.scrumStartX = (this.player.pos.x + this.bot.pos.x + this.player.size.x) / 2;
             }
             this.matchFinished = true;
-            this.matchFreezeTimer = 2.5; // Zamrożenie akcji na boisku na dokładnie 2.5 sekundy czasu rzeczywistego
-            this.ball.flameColor = 'NONE'; // Natychmiastowe zgaszenie aury ognia na piłce
+            this.matchFreezeTimer = 2.5;
+            this.ball.flameColor = 'NONE';
         }
 
-        if (this.matchFinished) {
+if (this.matchFinished) {
             if (!this.isWhistlePlayed) {
                 playSFX('kickoff'); // Odpalenie dźwięku syreny końcowej
                 this.isWhistlePlayed = true;
@@ -518,11 +601,19 @@ update(dt: number) {
             this.matchFreezeTimer -= realDt;
             if (this.matchFreezeTimer < 0) this.matchFreezeTimer = 0;
 
-            // INŻYNIERIA WYJŚCIA Z KLINCZU: Obaj zawodnicy z maślaną płynnością odsuwają się od siebie o bezpieczny dystans
-            const targetPlayerX = this.scrumStartX - this.player.size.x - 24;
-            const targetBotX = this.scrumStartX + 24;
-            this.player.pos.x += (targetPlayerX - this.player.pos.x) * realDt * 7.5;
-            this.bot.pos.x += (targetBotX - this.bot.pos.x) * realDt * 7.5;
+            if ((this as any).finalStretchActive) {
+                // Finałowy bieg: utrzymujemy bota ukrytego poza areną i stabilizujemy pozycję gracza
+                this.bot.pos.set(-1000, -1000);
+                this.bot.vel.set(0, 0);
+                this.player.vel.set(0, 0);
+                this.player.dirX = 0;
+            } else {
+                // INŻYNIERIA WYJŚCIA Z KLINCZU: Obaj zawodnicy z maślaną płynnością odsuwają się od siebie o bezpieczny dystans
+                const targetPlayerX = this.scrumStartX - this.player.size.x - 24;
+                const targetBotX = this.scrumStartX + 24;
+                this.player.pos.x += (targetPlayerX - this.player.pos.x) * realDt * 7.5;
+                this.bot.pos.x += (targetBotX - this.bot.pos.x) * realDt * 7.5;
+            }
 
             // Piłka płynnie i naturalnie opada/centruje się na murawie boiska pomiędzy nimi
             const targetBallX = this.scrumStartX - this.ball.size.x / 2;
@@ -552,25 +643,22 @@ update(dt: number) {
             this.bot.knockbackTimer = this.scrumSpecialSlowMoTimer;
             this.bot.isWaitingForScrumRecovery = true; 
 
-            if (this.scrumSpecialSlowMoTimer <= 0) {
+if (this.scrumSpecialSlowMoTimer <= 0) {
                 this.scrumSpecialSlowMoTimer = 0;
                 this.scrumSpecialTextTimer = 0;
                 
                 // POPRAWKA FINISZU: Inteligentna weryfikacja roli zawodnika przed aktywacją strzałki naprowadzającej TD
-                if (this.isSpecialAttackWinning) {
+      if (this.isSpecialAttackWinning) {
                     this.isSpecialAttackWinning = false;
                     const isPlayerAttacker = this.player.role === PlayerRole.ATTACKER;
                     
                     this.resolveScrumWinner(true, true); // Oficjalne zwycięstwo gracza w minigrze QTE
                     this.scrumSlowMoTimer = 0;     // Zerujemy standardowe slow-mo finiszu, aby od razu wyjść do zoom-outu
                     
-                    if (isPlayerAttacker) {
-                        this.bot.knockbackTimer = 0;
-                        this.bot.isWaitingForScrumRecovery = true; // Bot zostaje powalony na ziemi
-                        this.showRunArrow = true;                  // Włączamy strzałkę biegu TYLKO jeśli gracz był Atakującym!
-                    } else {
-                        this.showRunArrow = false;                 // Jeśli gracz bronił – brak strzałki TD, zbieramy wolną piłkę z powietrza
-                    }
+                    // POPRAWKA: Całkowicie wyłączamy pokazywanie strzałki touchdownu po wygranej walce z taranem
+                    this.bot.knockbackTimer = 0;
+                    this.bot.isWaitingForScrumRecovery = true; 
+                    this.showRunArrow = false;                  
                     this.pendingRunArrow = false;
                 } else {
                     // POPRAWKA UX: Efekty znikają dokładnie w momencie uderzenia bota o ziemię, a on od razu płynnie wstaje (animacja 0.3s)!
@@ -582,14 +670,15 @@ update(dt: number) {
             dt *= 0.20; // Aplikacja 5-krotnego kinowego zwolnienia klatek
         }
 
-        // Odliczanie timerów HUD w czasie rzeczywistym
+// Odliczanie timerów HUD w czasie rzeczywistym
         if (this.scrumSpecialTextTimer > 0 && this.scrumSpecialSlowMoTimer <= 0) this.scrumSpecialTextTimer -= realDt;
         if (this.scrumSpecialFlashTimer > 0) this.scrumSpecialFlashTimer -= realDt;
+        if (this.groupSuccessMessageTimer > 0) this.groupSuccessMessageTimer -= realDt; // Aktualizacja powiadomienia w czasie rzeczywistym
 
-        // ========================================================================
+// ========================================================================
         // NOWOŚĆ: AKTUALIZACJA SPRĘŻYNOWANIA I PŁYNNEGO POSTĘPU PASKA SPECIAL ATTACK
         // ========================================================================
-        let targetProgress = 0.1 + (this.scrumComboCount / 5) * 0.9; // Skalowanie 10% - 100%
+        let targetProgress = 0.1 + (this.scrumComboCount / 16) * 0.9; // Skalowanie podzielone na 16 uderzeń!
         if (this.scrumSpecialSlowMoTimer > 0) {
             targetProgress = 1.0; // Trzymaj pełny stan podczas szarży specjalnej
         }
@@ -621,6 +710,10 @@ update(dt: number) {
             this.scrumSlowMoTimer -= dt;
             if (this.scrumSlowMoTimer <= 0) {
                 this.scrumSlowMoTimer = 0;
+                if (this.pendingScrumTimeModifier > 0) {
+                    this.addTime(this.pendingScrumTimeModifier);
+                    this.pendingScrumTimeModifier = 0;
+                }
                 // POPRAWKA: Aktywację strzałki i tekstu delegujemy niżej, do klatki pełnego zoom-outu kamery!
             }
         }
@@ -655,9 +748,10 @@ update(dt: number) {
         // Particle update
         for (let i = this.particles.length - 1; i >= 0; i--) {
             const p = this.particles[i];
-            p.life -= dt;
-            p.pos.add(p.vel.clone().scale(dt));
-            p.vel.y += PHYSICS.gravity * dt;
+            const pDt = (p as any).isBigConfetti ? realDt : dt;
+            p.life -= pDt;
+            p.pos.add(p.vel.clone().scale(pDt));
+            p.vel.y += PHYSICS.gravity * pDt;
             if (p.life <= 0) this.particles.splice(i, 1);
         }
 
@@ -697,32 +791,72 @@ update(dt: number) {
                 this.lastCountdownSecond = currentSecond;
             }
 
-            this.ball.updatePhysics(dt, [this.player, this.bot]);
-            if (this.countdownTimer <= 0) {
+            
+if (this.countdownTimer <= 0) {
                 this.showPlayerArrow = false; // Strzałka nad graczem znika bezpowrotnie w ułamku sekundy wystrzału piłki
-                playSFX('kickoff');
-                this.subState = GameSubState.KICKOFF_LAUNCH;
-                this.ball.allowCeilingBounce = false;
-                this.ball.vel.y = -800; // Launch high
-                this.ball.onGround = false;
-                this.ballOscillateCenter = GAME_WIDTH / 2 - this.ball.size.x / 2;
-                this.ballOscillatePhase = 0; // Gwarantuje start od 0 (brak teleportacji)
+                playSFX('whistle');
+                this.subState = GameSubState.REGULAR;
                 
-                // LOSOWANIE KIERUNKÓW (lewo/prawo dla każdej z sub-fal)
-                this.kickoffAmps = [
-                    Math.random() > 0.5 ? 1 : -1,
-                    Math.random() > 0.5 ? 1 : -1,
-                    Math.random() > 0.5 ? 1 : -1
-                ];
+                // REWOLUCJA: Podwójny, potężny i ultra-szybki wystrzał konfetti (Double Stadium Cannon Blast)
+                const particlesPerWave = 45; // Większa gęstość i intensywność
                 
-                // LOSOWANIE CZĘSTOTLIWOŚCI (zmienny chaos ruchu)
-                this.kickoffFreqs = [
-                    1.2 + Math.random() * 1.0, // Zamiast sztywnego 1.7
-                    0.5 + Math.random() * 0.6  // Zamiast sztywnego 0.8
-                ];
-
-                this.ball.flameColor = 'PURPLE'; // ZAPALENIE FIOLETOWEGO OGNIA tuż przed wystrzałem
-                this.acquiredMessage = "CATCH THE BALL";
+                // ==================== BLASK 1: FALA SZYBKA ====================
+                // Lewa armata - pierwsza fala
+                for (let i = 0; i < particlesPerWave; i++) {
+                    this.particles.push({
+                        pos: new Vector2(5, GAME_HEIGHT - 5),
+                        vel: new Vector2(400 + Math.random() * 400, -850 - Math.random() * 350),
+                        life: 1.3 + Math.random() * 0.7,
+                        type: i % 2 === 0 ? 'touchdown' : 'perfect',
+                        // @ts-ignore
+                        isBigConfetti: true
+                    });
+                }
+                // Prawa armata - pierwsza fala
+                for (let i = 0; i < particlesPerWave; i++) {
+                    this.particles.push({
+                        pos: new Vector2(GAME_WIDTH - 5, GAME_HEIGHT - 5),
+                        vel: new Vector2(-400 - Math.random() * 400, -850 - Math.random() * 350),
+                        life: 1.3 + Math.random() * 0.7,
+                        type: i % 2 === 0 ? 'touchdown' : 'perfect',
+                        // @ts-ignore
+                        isBigConfetti: true
+                    });
+                }
+                
+                // ==================== BLASK 2: FALA HYPER-SZYBKA ====================
+                // Lewa armata - druga fala (leci wyżej i ostrzej, separując się w locie)
+                for (let i = 0; i < particlesPerWave; i++) {
+                    this.particles.push({
+                        pos: new Vector2(5, GAME_HEIGHT - 5),
+                        vel: new Vector2(550 + Math.random() * 450, -1350 - Math.random() * 450),
+                        life: 1.4 + Math.random() * 0.6,
+                        type: i % 2 === 0 ? 'touchdown' : 'perfect',
+                        // @ts-ignore
+                        isBigConfetti: true
+                    });
+                }
+                // Prawa armata - druga fala
+                for (let i = 0; i < particlesPerWave; i++) {
+                    this.particles.push({
+                        pos: new Vector2(GAME_WIDTH - 5, GAME_HEIGHT - 5),
+                        vel: new Vector2(-550 - Math.random() * 450, -1350 - Math.random() * 450),
+                        life: 1.4 + Math.random() * 0.6,
+                        type: i % 2 === 0 ? 'touchdown' : 'perfect',
+                        // @ts-ignore
+                        isBigConfetti: true
+                    });
+                }
+                
+                // Hide bot by moving it far away
+                this.bot.pos.set(-1000, -1000);
+                this.bot.vel.set(0, 0);
+                this.botSpawnTimer = 0.8;
+                
+                this.player.role = PlayerRole.ATTACKER; // To make him look right
+                
+                // Lock player to 1/3 screen
+                this.player.pos.set(GAME_WIDTH / 3 - this.player.size.x / 2, GROUND_Y - this.player.size.y);
             }
             // Ensure characters are locked
             this.player.dirX = 0;
@@ -735,7 +869,7 @@ update(dt: number) {
             this.bot.dirX = 0;
             this.player.vel.x = 0;
             this.bot.vel.x = 0;
-            this.ball.updatePhysics(dt, [this.player, this.bot]);
+            
             this.updateBot(dt); // bot needs to evaluate CELEBRATION internally to stop
         } else if (this.subState === GameSubState.BALL_ACQUIRED) {
             // Both are retreating to positions
@@ -791,14 +925,172 @@ update(dt: number) {
             this.bot.dirX = 0;
         }
 
+
+        if (this.invincibilityTimer > 0) {
+            this.invincibilityTimer -= realDt;
+            setBGM('cheer');
+            if (this.invincibilityTimer <= 0) {
+                this.invincibilityTimer = 0;
+                if (this.subState === GameSubState.SCRUM_MATRIX) {
+                    setBGM('scrum');
+                } else {
+                    setBGM('board');
+                }
+            }
+        }
+
+        if (this.subState === GameSubState.REGULAR && this.isScrolling) {
+            const currentScrollSpeed = this.invincibilityTimer > 0 ? this.bgScrollSpeed * this.invincibilityMultiplier : this.bgScrollSpeed;
+            this.bgScrollX += currentScrollSpeed * dt;
+            this.bot.ignoreWalls = true;
+            
+            // Drop bounce and collision logic
+            for (const drop of this.drops) {
+                if (drop.collected) continue;
+                drop.time += dt * 3;
+                drop.yOff = Math.sin(drop.time) * 15;
+                
+                // Screen X position of the drop (player stays roughly at GAME_WIDTH/3)
+                // The world moves by bgScrollX. A drop at worldX appears at worldX - bgScrollX + GAME_WIDTH/3? 
+                // Wait, background is drawn at - (bgScrollX % bgWidth). 
+                // That means the camera is effectively at bgScrollX. 
+                // So on-screen X = drop.worldX - this.bgScrollX. 
+                const dropScreenX = drop.worldX - this.bgScrollX;
+                drop.x = dropScreenX;
+                
+                // If drop is on screen, check collision with player
+                if (dropScreenX > -100 && dropScreenX < 900) {
+                    const pX = this.player.pos.x;
+                    // give it a generous hitbox
+      if (dropScreenX < pX + this.player.size.x && dropScreenX + 50 > pX) {
+                        drop.collected = true;
+                        playSFX('catch');
+                        if (drop.type === 'TIME') {
+                            this.addTime(10); // already adds +10 and confetti!
+                        } else if (drop.type === 'STAR') {
+                            this.invincibilityTimer = 9.0;
+                            this.botSpawnTimer = 0.0; // Natychmiastowo wyzwala napływ pierwszego bota z serii szału
+                        }
+                    }
+                }
+            }
+            
+            if (this.bgScrollX >= this.totalLevelDistance) {
+                this.bgScrollX = this.totalLevelDistance;
+                if (!(this as any).finalStretchActive) {
+                    (this as any).finalStretchActive = true;
+                    playSFX('cheer');
+                    this.acquiredMessage = "GET TOUCHDOWN!";
+                }
+            }
+
+            // Jeśli bot leży powalony na trawie, płynnie przesuwamy go w lewo wraz z całymi jardami boiska, aż wypadnie poza ekran!
+            if (this.bot.isWaitingForScrumRecovery) {
+                this.bot.pos.x -= this.bgScrollSpeed * dt;
+                if (this.bot.pos.x < -200) {
+                    this.bot.isWaitingForScrumRecovery = false;
+                    this.bot.pos.set(-1000, -1000); // Czyszczenie i ostateczny despawn z pamięci RAM
+                }
+            }
+        } else if (this.newPlayerTransitionTimer <= 0) {
+            this.bot.ignoreWalls = false;
+        }
+        if (this.subState === GameSubState.REGULAR || this.subState === GameSubState.COUNTDOWN) {
+            this.player.dirX = 0; // Prevent user input from moving player
+        }
+
+        if (this.newPlayerTransitionTimer > 0) {
+            this.player.stunTimer = 0;
+            this.player.knockbackTimer = 0;
+            this.player.debuffTimer = 0;
+            this.player.isTackling = false;
+            this.player.hasTackled = false;
+            this.player.isDiving = false;
+            this.player.vel.set(0, 0);
+            this.player.dirX = 0;
+            
+            this.bot.stunTimer = 0;
+            this.bot.knockbackTimer = 0;
+            this.bot.debuffTimer = 0;
+            this.bot.isTackling = false;
+            this.bot.hasTackled = false;
+            this.bot.isDiving = false;
+            this.bot.vel.set(0, 0);
+            this.bot.dirX = 0;
+            this.bot.hasHitPlayer = true; // Prevent collision processing
+        }
         this.player.update(dt);
         this.bot.update(dt);
+
+// POPRAWKA: Dodano warunek && this.newPlayerTransitionTimer <= 0, aby skrypt nie ciągnął Sama do przodu w trakcie animacji rzutu!
+        if (this.subState === GameSubState.REGULAR && this.player.stunTimer <= 0 && this.newPlayerTransitionTimer <= 0) {
+            // Jeśli aktywna jest ostatnia prosta, celem staje się prawa krawędź ekranu (strefa przyłożenia)
+            const targetX = (this as any).finalStretchActive ? (GAME_WIDTH - 100) : (GAME_WIDTH / 3 - this.player.size.x / 2);
+            if (this.player.pos.x < targetX) {
+                this.player.pos.x += 200 * dt;
+                if (this.player.pos.x > targetX) this.player.pos.x = targetX;
+            } else if (this.player.pos.x > targetX) {
+                this.player.pos.x -= 200 * dt;
+                if (this.player.pos.x < targetX) this.player.pos.x = targetX;
+            } else {
+                this.player.vel.x = 0;
+            }
+
+// Detekcja dotknięcia strzałki touchdownu na końcu planszy
+            if ((this as any).finalStretchActive && this.player.pos.x >= GAME_WIDTH - 110 && !this.matchFinished) {
+                playSFX('whistle');
+                this.matchFinished = true;
+                this.matchFreezeTimer = 2.5;
+                this.scrumStartX = this.player.pos.x;
+                this.acquiredMessage = null;
+
+                // Widowiskowy, dwufazowy wystrzał armatni konfetti na mecie
+                const particlesPerWave = 45;
+                // FALA 1: Szybka i niska
+                for (let i = 0; i < particlesPerWave; i++) {
+                    this.particles.push({
+                        pos: new Vector2(5, GAME_HEIGHT - 5),
+                        vel: new Vector2(400 + Math.random() * 400, -850 - Math.random() * 350),
+                        life: 1.3 + Math.random() * 0.7,
+                        type: i % 2 === 0 ? 'touchdown' : 'perfect',
+                        isBigConfetti: true
+                    } as any);
+                    this.particles.push({
+                        pos: new Vector2(GAME_WIDTH - 5, GAME_HEIGHT - 5),
+                        vel: new Vector2(-400 - Math.random() * 400, -850 - Math.random() * 350),
+                        life: 1.3 + Math.random() * 0.7,
+                        type: i % 2 === 0 ? 'touchdown' : 'perfect',
+                        isBigConfetti: true
+                    } as any);
+                }
+                // FALA 2: Hyper-wznosząca pod sufit
+                for (let i = 0; i < particlesPerWave; i++) {
+                    this.particles.push({
+                        pos: new Vector2(5, GAME_HEIGHT - 5),
+                        vel: new Vector2(550 + Math.random() * 450, -1350 - Math.random() * 450),
+                        life: 1.4 + Math.random() * 0.6,
+                        type: i % 2 === 0 ? 'touchdown' : 'perfect',
+                        isBigConfetti: true
+                    } as any);
+                    this.particles.push({
+                        pos: new Vector2(GAME_WIDTH - 5, GAME_HEIGHT - 5),
+                        vel: new Vector2(-550 - Math.random() * 450, -1350 - Math.random() * 450),
+                        life: 1.4 + Math.random() * 0.6,
+                        type: i % 2 === 0 ? 'touchdown' : 'perfect',
+                        isBigConfetti: true
+                    } as any);
+                }
+            }
+        }
         
         // Determine facing directions
         if (this.subState === GameSubState.REGULAR || this.subState === GameSubState.KICKING || this.subState === GameSubState.COUNTDOWN || this.subState === GameSubState.CELEBRATION || this.subState === GameSubState.BALL_ACQUIRED || this.subState === GameSubState.SCRUM_MATRIX || this.subState === GameSubState.FREE_BALL) {
             
-            // Attacker always faces their goal. Defender always faces attacker.
-            if (this.player.role === PlayerRole.ATTACKER) {
+            // Endless runner specific facings
+            if (this.subState === GameSubState.REGULAR) {
+                this.player.facingX = 1;
+                this.bot.facingX = -1;
+            } else if (this.player.role === PlayerRole.ATTACKER) {
                 if (this.player.stunTimer <= 0 && !this.player.isWaitingForScrumRecovery && (!this.player.isRetreating || this.player.isAtRetreatPos)) {
                     // POPRAWKA: Jeśli gracz wygrał klincz i zawraca (biegnie w lewo), obracamy jego grafikę zgodnie z wcisków klawiszy!
                     this.player.facingX = this.player.dirX !== 0 ? this.player.dirX : 1; 
@@ -819,90 +1111,206 @@ update(dt: number) {
                 if (this.bot.dirX !== 0 && this.bot.stunTimer <= 0 && !this.bot.isWaitingForScrumRecovery && (!this.bot.isRetreating || this.bot.isAtRetreatPos)) this.bot.facingX = this.bot.dirX;
             }
         }
+// ========================================================================
+        // LOGIKA AKTYWACJI JUMP EVENT (Paski kinowe i przycisk JUMP)
+        // ========================================================================
+        const botIsActiveOnScreen = this.bot.pos.x > -100 && this.bot.pos.x < GAME_WIDTH + 200;
+
+        // Paski i przycisk JUMP aktywują się WYŁĄCZNIE dla bota typu SLIDE (wślizg). Zapobiega to pokazywaniu JUMP przed klinczem!
+        if (this.subState === GameSubState.REGULAR && botIsActiveOnScreen && this.botAliveTimer >= 1.0 && !this.bot.hasHitPlayer && this.player.stunTimer <= 0 && this.botType === 'SLIDE' && this.invincibilityTimer <= 0) {
+            if (this.bot.pos.x < this.player.pos.x - 30) {
+                this.isSlideJumpActive = false;
+            } else {
+                this.isSlideJumpActive = true;
+            }
+        } else {
+            this.isSlideJumpActive = false;
+        }
+
+// POPRAWKA: Definiujemy, czy czarne pasy kinowe powinny zacząć się wysuwać.
+        // Rozbudowano zestaw o warunek aktywnego wyzwania grupowego (isGroupQTEActive) oraz efektu gwiazdki.
+        const shouldShowCinematicBars = this.isSlideJumpActive || this.isGroupQTEActive || this.invincibilityTimer > 0 || (
+            this.subState === GameSubState.REGULAR && 
+            botIsActiveOnScreen && 
+            this.botAliveTimer >= 1.0 && 
+            !this.bot.hasHitPlayer && 
+            this.player.stunTimer <= 0 && 
+            this.botType === 'CLINCH'
+        );
+
+        // Płynna interpolacja przejścia (200ms) sterowana zunifikowanym warunkiem nadejścia wroga
+        if (shouldShowCinematicBars) {
+            this.slideJumpTransition += realDt * 5;
+            if (this.slideJumpTransition > 1) this.slideJumpTransition = 1;
+        } else {
+            this.slideJumpTransition -= realDt * 5;
+            if (this.slideJumpTransition < 0) this.slideJumpTransition = 0;
+        }
         
-        // Solid wall collision globally in REGULAR state
-        if (this.subState === GameSubState.REGULAR && this.player.stunTimer <= 0 && this.bot.stunTimer <= 0 && !this.player.isWaitingForScrumRecovery && !this.bot.isWaitingForScrumRecovery && !this.player.isRetreating && !this.bot.isRetreating) {
-            const pCenter = this.player.pos.x + this.player.size.x / 2;
-            const bCenter = this.bot.pos.x + this.bot.size.x / 2;
-            const dist = Math.abs(pCenter - bCenter);
-            
-            // Adjust to their actual sizes since they are rects
-            const combinedHalfWidths = (this.player.size.x + this.bot.size.x) / 2;
-            
-            if (dist < combinedHalfWidths) {
-                const overlap = combinedHalfWidths - dist;
-                if (pCenter < bCenter) {
-                    this.player.pos.x -= overlap / 2;
-                    this.bot.pos.x += overlap / 2;
-                    if (this.player.vel.x > 0) this.player.vel.x = 0;
-                    if (this.bot.vel.x < 0) this.bot.vel.x = 0;
-                } else {
-                    this.player.pos.x += overlap / 2;
-                    this.bot.pos.x -= overlap / 2;
-                    if (this.player.vel.x < 0) this.player.vel.x = 0;
-                    if (this.bot.vel.x > 0) this.bot.vel.x = 0;
-                }
-                
-                // Trigger scrum automatically on collision in REGULAR state
-                if (this.subState === GameSubState.REGULAR && !this.isExtraPointAttempt) {
-                    this.startScrum();
+// POPRAWKA: Włączamy licznik groupTriggerTimer ustawiony na równe 0.2s po tym, jak formacja 3 botów przekroczy skraj planszy!
+        if (this.botType === 'GROUP' && this.subState === GameSubState.REGULAR && !this.isGroupQTEActive && !this.bot.hasHitPlayer && this.player.stunTimer <= 0 && this.bot.pos.x > -100 && this.invincibilityTimer <= 0) {
+            if (this.bot.pos.x + 70 < GAME_WIDTH) {
+                this.groupTriggerTimer += realDt;
+                if (this.groupTriggerTimer >= 0.6) { 
+                    this.isGroupQTEActive = true;
+                    this.groupKickPower = 0;
+                    this.groupKickDir = 1;
+                    this.teammateBotX = GAME_WIDTH / 3 - this.player.size.x / 2; 
+                    this.teammateActive = false; 
+                    playSFX('whistle');
                 }
             }
         }
         
-        // Handle SCRUM_MATRIX state (Dynamiczna, sportowa walka QTE o wysokiej intensywności)
+        // NOWOŚĆ: Kontrola falowania paska podania oraz automatyczna porażka jeśli formacja stratuje gracza
+        if (this.isGroupQTEActive) {
+            // POPRAWKA: Zmieniono bazowy dzielnik czasu z 0.6s na 1.0s. Piłka wewnątrz paska lata teraz o 40% wolniej, dając pełną swobodę trafienia w cel!
+            this.groupKickPower += this.groupKickDir * realDt * (100 / 1.0); 
+            if (this.groupKickPower > 100) { this.groupKickPower = 100; this.groupKickDir = -1; }
+            if (this.groupKickPower < 0) { this.groupKickPower = 0; this.groupKickDir = 1; }
+            
+            // Kolizja krytyczna (Przekroczenie krawędzi - brak reakcji na czas)
+            if (this.bot.pos.x <= this.player.pos.x + this.player.size.x) {
+                this.handleGroupKickResult(false);
+            }
+        }
+        
+        // NOWOŚĆ: Aktualizacja liczników animacji zanikania starej i pozycjonowania nowej postaci gracza
+        if (this.oldPlayerDisappearTimer > 0) {
+            this.oldPlayerDisappearTimer -= realDt;
+        }
+        
+        if (this.timeModifierTimer > 0) {
+            this.timeModifierTimer -= realDt;
+        }
+        
+if (this.newPlayerTransitionTimer > 0) {
+            this.newPlayerTransitionTimer -= realDt;
+            
+            const totalTime = 3.0; // Updated to 3.0s for slower pan
+            let progress = 1.0 - (Math.max(0, this.newPlayerTransitionTimer) / totalTime);
+            if (progress > 1) progress = 1;
+            
+            const targetX = GAME_WIDTH / 3 - this.player.size.x / 2; 
+            
+            // Tło przesuwa się płynnie, symulując stabilny ruch obiektywu kamery do przodu za lecącą piłką
+            const panSpeed = this.bgScrollSpeed;
+            this.bgScrollX += panSpeed * realDt;
+            
+            // Pierwszy zawodnik i mur botów stoją nieruchomo na trawie i naturalnie odsuwają się w lewo poza ekran
+            this.player.pos.x -= panSpeed * realDt;
+            this.bot.pos.x -= panSpeed * realDt;
+            
+            // Obliczenie stabilnej, horyzontalnej i wolniejszej paraboli lotu (śledzącej odsuwającego się gracza)
+            const currentOldPlayerX = (this as any).passStartX - (panSpeed * totalTime * progress);
+            const currentBallX = currentOldPlayerX + (targetX - currentOldPlayerX) * progress;
+            
+            const arcHeight = 180; // Wolny, wysoki łuk
+            const currentBallY = (this as any).passStartY - Math.sin(progress * Math.PI) * arcHeight;
+            this.worldRefBallSet(currentBallX, currentBallY);
+            
+            // Nowy zawodnik gracza pojawia się z prawej strony i zajmuje swoją pozycję
+            this.teammateBotX = targetX + (1.0 - progress) * (panSpeed * totalTime * 0.8);
+            this.teammateActive = true; 
+            
+   if (this.newPlayerTransitionTimer <= 0) {
+                this.newPlayerTransitionTimer = 0;
+                this.teammateActive = false;
+                
+                playSFX('catch');
+                this.addTime(5);
+                this.groupSuccessMessageTimer = 2.0; // Tekst pojawia się dokładnie na 2 sekundy w momencie chwytu
+                
+                // Przekazanie sterowania na nowego gracza
+                this.player.pos.x = targetX;
+                this.player.pos.y = GROUND_Y - this.player.size.y;
+                this.player.vel.set(0, 0);
+                this.player.stunTimer = 0;
+                this.player.knockbackTimer = 0;
+                this.player.debuffTimer = 0;
+                this.player.isTackling = false;
+                this.player.hasTackled = false;
+                this.player.isDiving = false;
+                this.player.onGround = true;
+                this.player.isWaitingForScrumRecovery = false;
+                this.player.ignoreWalls = false;
+                this.bot.ignoreWalls = false;
+                
+                this.ball.pos.set(this.player.pos.x + this.player.size.x * 0.6, this.player.pos.y + 10);
+                this.ball.onGround = true;
+                this.ball.vel.set(0, 0);
+                
+                // Odpalenie licznika spawnu kolejnego obrońcy
+                this.botSpawnTimer = 0.8;
+                this.bot.pos.set(-1000, -1000);
+            }
+            
+            this.isScrolling = false;
+            this.player.dirX = 0;
+            this.player.vel.set(0, 0);
+            this.bot.vel.set(0, 0);
+            return;
+        }
+
+// Endless runner bot collision
+        if (this.subState === GameSubState.REGULAR && this.player.stunTimer <= 0 && this.bot.pos.x > -100 && this.bot.pos.x < GAME_WIDTH + 100 && !this.bot.hasHitPlayer) {
+            if (this.checkAABB(this.player, this.bot)) {
+                if (this.invincibilityTimer > 0) {
+                    this.bot.hasHitPlayer = true;
+                    this.bot.knockbackTimer = 0.4;
+                    this.bot.isWaitingForScrumRecovery = true;
+                    this.bot.vel.y = -400;
+                    this.bot.vel.x = -200;
+                    this.spawnParticles(this.bot.pos.x, this.bot.pos.y, 'hit', 15);
+                    playSFX('special_attack');
+                    return; // Skip normal bot logic
+                }
+
+                this.bot.hasHitPlayer = true;
+                
+                // NOWOŚĆ: Jeśli uderza w nas taran (CLINCH), natychmiast inicjujemy minigrę klinczu planszy!
+                if (this.botType === 'CLINCH') {
+                    this.startScrum();
+                    return;
+                }
+                this.addTime(-5);
+                this.player.stunTimer = 3.0; // Stay down for 3 seconds
+                this.player.knockbackTimer = 0.5;
+                this.player.vel.set(-100, -200); // Small knockback
+                this.player.onGround = false;
+                
+                // Ball pops out softly so it stays near the player
+                this.ball.vel.set((Math.random() - 0.5) * 20, -100);
+                this.ball.bounciness = 0.05;
+                this.ball.onGround = false;
+                
+                // Bot finishes its slide naturally due to friction
+                this.bot.isTackling = false;
+                this.bot.hasTackled = true; // Prevent re-tackling immediately
+                
+                // We no longer instantly despawn the bot
+                // this.botSpawnTimer will not be reset here, bot will resume running when player gets up
+                
+                playSFX('hit');
+                this.screenShake = 0.3;
+            }
+        }
+        
+// Update isScrolling flag based on player stun, transition and match finish state
+        this.isScrolling = this.player.stunTimer <= 0 && this.newPlayerTransitionTimer <= 0 && !this.matchFinished;
+
+// Handle SCRUM_MATRIX state (Dynamiczna, sportowa walka QTE o wysokiej intensywności)
         if (this.subState === GameSubState.SCRUM_MATRIX) {
             this.scrumTimer += dt;
             
-            // POPRAWKA: Przeciwnik wykonuje teraz potężny atak cyklicznie co 1.2 sekundy (zamiast 2.0s), zwiększając wyzwanie!
-            const lastInterval = Math.floor((this.scrumTimer - dt) / 1.2);
-            const currentInterval = Math.floor(this.scrumTimer / 1.2);
-            if (currentInterval > lastInterval && this.scrumTimer > 0.5) {
-                this.scrumTargetOffset -= 80; 
-                this.bot.scrumPushTimer = 0.35; 
-                this.spawnParticles(this.bot.pos.x + this.bot.size.x/2, this.bot.pos.y, 'miss', 15);
-                this.screenShake = 0.4;
-                playSFX('hit');
+            if (this.scrumSpecialSlowMoTimer <= 0 && this.bot.stunTimer <= 0) {
+                // POPRAWKA BALANSU: Zmniejszono tempo spychania w tył (z 105 na 40), aby dać graczowi czas na reakcję i zorientowanie się
+                this.scrumTargetOffset -= realDt * 40; 
+                this.scrumPrompt = 'PUSH';
                 
-                if (typeof navigator !== 'undefined' && navigator.vibrate) {
-                    navigator.vibrate([160, 60, 100]);
-                }
-            }
-
-            // POPRAWKA UX: Podczas trwania szarży Special Attack oraz gdy bot leży powalony na ziemi,
-            // całkowicie wyłączamy i ukrywamy prompte QTE oraz strzałki, dając czas na odtworzenie animacji leżenia i wstawania.
-            if (this.scrumSpecialSlowMoTimer > 0 || this.bot.stunTimer > 0) {
-                this.scrumPrompt = null;
-                this.scrumPromptTimer = 0.2; 
-            } else {
-                // Minigame logic
-                this.scrumPromptTimer -= dt;
-                if (this.scrumPrompt === null) {
-                    if (this.scrumPromptTimer <= 0) {
-                        this.scrumPrompt = Math.random() > 0.5 ? 'PUSH' : 'HOLD';
-                        this.scrumPromptTimer = 0.48; 
-                        this.scrumBotPressDelay = 0.16 + Math.random() * 0.18; 
-                        this.player.scrumCharging = false; 
-                        this.bot.scrumCharging = false;
-                    }
-                } else {
-                    // Bot podejmuje działanie, jeśli gracz go nie wyprzedził
-                    if (!this.bot.scrumCharging && this.scrumPromptTimer <= 0.48 - this.scrumBotPressDelay) {
-                        this.bot.scrumCharging = true;
-                        if (Math.random() > 0.25) { 
-                            this.resolveScrumAction(this.bot, this.scrumPrompt, true);
-                        } else {
-                            this.resolveScrumAction(this.bot, this.scrumPrompt === 'PUSH' ? 'HOLD' : 'PUSH', true);
-                        }
-                    }
-                    
-                    // TIMEOUT / KARA ZA BEZCZYNNOŚĆ
-                    if (this.scrumPromptTimer <= 0) {
-                        this.scrumTargetOffset -= 46; 
-                        this.spawnParticles(this.player.pos.x + this.player.size.x/2, this.player.pos.y, 'miss', 5);
-                        this.scrumPrompt = null;
-                        this.scrumPromptTimer = 0.15; 
-                    }
+                // Jeśli taran przepchnie nas poza krytyczną linię - przegrywamy klincz automatycznie
+                if (this.scrumOffset <= -this.scrumWinOffset) {
+                    this.resolveScrumWinner(false); // Wywołanie porażki gracza
                 }
             }
             
@@ -949,7 +1357,7 @@ update(dt: number) {
         if (this.subState === GameSubState.THE_SNAP || this.subState === GameSubState.FREE_BALL || this.subState === GameSubState.KICKOFF_LAUNCH) {
             if (this.subState === GameSubState.KICKOFF_LAUNCH) {
                 this.ballOscillatePhase += dt * 4.0;
-                this.ball.updatePhysics(dt, [this.player, this.bot]); 
+                 
                 
                 let chaoticX = this.ballOscillateCenter 
                     + Math.sin(this.ballOscillatePhase) * (GAME_WIDTH * 0.25) * this.kickoffAmps[0]
@@ -986,7 +1394,7 @@ update(dt: number) {
                         this.ball.bounciness = 1.0 - (this.freeBallTimer / 8.0) * 0.6;
                     }
                 }
-                this.ball.updatePhysics(dt, [this.player, this.bot]);
+                
             }
             
             const canCatch = this.subState !== GameSubState.KICKOFF_LAUNCH && this.fumbleProtectTimer <= 0;
@@ -1005,10 +1413,12 @@ update(dt: number) {
                     this.assignBall(this.bot, this.player);
                 }
             }
-        } else if (this.subState === GameSubState.REGULAR || this.subState === GameSubState.KICKING || this.subState === GameSubState.BALL_ACQUIRED || this.subState === GameSubState.SCRUM_MATRIX || this.subState === GameSubState.TACKLE_RESOLVE || (this.subState === GameSubState.CELEBRATION && this.celebrationMessage.includes("TOUCHDOWN"))) {
+        } else if (this.subState === GameSubState.COUNTDOWN || this.subState === GameSubState.REGULAR || this.subState === GameSubState.KICKING || this.subState === GameSubState.BALL_ACQUIRED || this.subState === GameSubState.SCRUM_MATRIX || this.subState === GameSubState.TACKLE_RESOLVE || (this.subState === GameSubState.CELEBRATION && this.celebrationMessage.includes("TOUCHDOWN"))) {
             const attacker = this.player.role === PlayerRole.ATTACKER ? this.player : this.bot;
             
-            if (this.isExtraPointAttempt && this.subState === GameSubState.KICKING) {
+            if (attacker.stunTimer > 0) {
+                this.ball.updatePhysics(dt, []);
+            } else if (this.isExtraPointAttempt && this.subState === GameSubState.KICKING) {
                 this.ball.pos.set(
                     attacker.pos.x + (attacker.facingX > 0 ? attacker.size.x + 5 : -this.ball.size.x - 5),
                     GROUND_Y - this.ball.size.y
@@ -1043,7 +1453,7 @@ update(dt: number) {
             }
 
         } else if (this.subState === GameSubState.BALL_IN_AIR) {
-            this.ball.updatePhysics(dt, [this.player, this.bot]);
+            
             
             if (this.ball.pos.y >= GROUND_Y - this.ball.size.y) {
                 if (this.isExtraPointAttempt) {
@@ -1117,7 +1527,7 @@ update(dt: number) {
                         this.acquiredMessage = this.pendingAcquiredMessage;
                         this.pendingAcquiredMessage = null;
                     }
-                    if (this.pendingRunArrow) {
+           if (this.pendingRunArrow) {
                         this.showRunArrow = true;
                         this.pendingRunArrow = false;
                     }
@@ -1158,73 +1568,235 @@ update(dt: number) {
         setGruntSoundActive(shouldPlayGrunt);
     }
     
-   updateBot(dt: number) {
-        if (this.bot.stunTimer > 0 || this.bot.isRetreating) return;
+// NOWOŚĆ: Metody obsługi kliknięcia KICK oraz weryfikacji trafienia w strefę zieloną
+    handleGroupKickPress() {
+        if (!this.isGroupQTEActive) return;
+        const isCorrect = this.groupKickPower >= 65 && this.groupKickPower <= 93; // Zielona strefa paska wykopu
+        this.handleGroupKickResult(isCorrect);
+    }
+
+handleGroupKickResult(success: boolean) {
+        this.isGroupQTEActive = false;
+        this.groupTriggerTimer = 0;
         
-        // POPRAWKA: Bezwzględne zatrzymanie i zerowanie pędów bota przez 1 sekundę po zoom-outu, dające graczowi pełny czas na reakcję!
-        if (this.botTouchdownDelayTimer > 0) {
-            this.botTouchdownDelayTimer -= dt;
-            if (this.botTouchdownDelayTimer < 0) this.botTouchdownDelayTimer = 0;
+if (success) {
+            playSFX('kick');
+            
+            // Wydłużono czas przejścia do 3.0s dla dłuższego i wolniejszego lotu piłki parabolą
+            this.oldPlayerDisappearTimer = 0;  
+            this.newPlayerTransitionTimer = 3.0; 
+            this.groupSuccessMessageTimer = 0; // Usunięto przedwczesne wyzwolenie tekstu w locie piłki
+            
+            // Zatrzymujemy natychmiast obecnego gracza
+            this.player.vel.set(0, 0);
+            this.player.dirX = 0;
+            this.bot.vel.set(0, 0);
+            
+            // Ignorowanie ścian dla starego gracza i botów, aby mogły wyjechać poza ekran
+            this.player.ignoreWalls = true;
+            this.bot.ignoreWalls = true;
+            
+            (this as any).passStartX = this.player.pos.x + this.player.size.x;
+            (this as any).passStartY = this.player.pos.y + 10;
+            (this as any).passTeammateStartX = this.teammateBotX;
+        } else {
+            this.addTime(-5);
+            // PORAŻKA: Identyczny efekt upadku, leżenia i zachowania przeciwnika jak po wślizgu
+            this.subState = GameSubState.REGULAR;
+            this.player.stunTimer = 3.0; 
+            this.player.knockbackTimer = 0.5;
+            this.player.vel.set(-100, -200);
+            this.player.onGround = false;
+            
+            this.bot.vel.set(0, 0);
+            this.bot.hasHitPlayer = true;
+            this.bot.hasTackled = true;
+            
+            playSFX('hit');
+            this.screenShake = 0.4;
+            this.teammateActive = false;
+        }
+    }
+
+updateBot(dt: number) {
+        // Blokujemy spawner i despawnujemy boty, jeśli gracz zbliża się horyzontalnie do finałowej strefy touchdownu
+        if ((this as any).finalStretchActive || this.bgScrollX >= this.totalLevelDistance - 900) {
+            this.bot.pos.set(-1000, -1000);
             this.bot.dirX = 0;
-            this.bot.vel.x = 0;
+            this.bot.vel.set(0, 0);
+            return;
+        }
+        if (this.subState !== GameSubState.REGULAR || !this.isScrolling) {
+            this.bot.dirX = 0;
             return;
         }
 
-        if (this.subState === GameSubState.CELEBRATION) {
-             this.bot.dirX = 0;
-             return;
-        }
-        
-        if (this.botAvoidTimer > 0) {
-            this.botAvoidTimer -= dt;
-        }
+// Dynamiczna kolekcja botów szału gwiazdki
+        (this as any).frenzyBots = (this as any).frenzyBots || [];
 
-        if (this.isExtraPointAttempt && this.bot.role === PlayerRole.DEFENDER) {
-             // Stand still waiting for opponent's kick, cannot do anything
-             this.bot.dirX = 0;
-             return;
-        }
-        if (this.subState === GameSubState.KICKING && this.bot.role === PlayerRole.ATTACKER) {
-             this.bot.dirX = 0;
-             if (this.isChargingKick && this.isExtraPointAttempt && this.kickPower > 70 + Math.random() * 15) {
-                 this.releaseKick();
-             }
-             return;
-        }
-        
-        let targetX = this.bot.pos.x;
-        
-        if (this.subState === GameSubState.THE_SNAP || this.subState === GameSubState.FREE_BALL || this.subState === GameSubState.KICKOFF_LAUNCH) {
-            // Chase ball
-            targetX = this.ball.pos.x;
-        } else if (this.bot.role === PlayerRole.ATTACKER) {
-            // Run to left endzone
-            targetX = -100;
-        } else if (this.bot.role === PlayerRole.DEFENDER) {
-            if (this.subState === GameSubState.REGULAR && this.botAvoidTimer > 0) {
-                if (this.botAvoidTimer > 1.5) {
-                    // Run away from player
-                    targetX = this.player.pos.x < this.bot.pos.x ? GAME_WIDTH : 0;
-                } else {
-                    // Wait before chasing
-                    targetX = this.bot.pos.x;
+        // Wyliczamy aktualną prędkość przewijania planszy pod szał gwiazdki
+        const currentScrollSpeed = this.invincibilityTimer > 0 ? this.bgScrollSpeed * this.invincibilityMultiplier : this.bgScrollSpeed;
+
+        // Aktualizacja i fizyka wszystkich niezależnych botów szału na planszy
+        for (let i = (this as any).frenzyBots.length - 1; i >= 0; i--) {
+            const b = (this as any).frenzyBots[i];
+            b.dirX = -1;
+
+            // Przesuwamy pozycję bota horyzontalnie w tył planszy zgodnie z pędem przewijania tła
+            if (this.isScrolling) {
+                b.pos.x -= currentScrollSpeed * dt;
+            }
+
+if (b.frenzyBotType === 'SLIDE' && !b.isWaitingForScrumRecovery) {
+                const dist = b.pos.x - this.player.pos.x;
+                if (dist > 0 && dist < 340 && !b.isTackling && !b.hasTackled) {
+                    b.isTackling = true;
+                    b.hasTackled = true;
+                    b.tackleTimer = 2.0;
+                    b.vel.x = -600;
+                    playSFX('hit');
                 }
-            } else {
-                // Chase attacker
-                targetX = this.player.pos.x;
+            }
+
+            b.update(dt);
+
+// Kolizja niezależnych botów z niezniszczalnym graczem
+            if (!b.hasHitPlayer && this.checkAABB(this.player, b)) {
+                b.hasHitPlayer = true;
+                b.knockbackTimer = 0.4;
+                b.isWaitingForScrumRecovery = true;
+                b.vel.y = -400;
+                b.vel.x = -200;
+                this.spawnParticles(b.pos.x, b.pos.y, 'hit', 15);
+                playSFX('special_attack');
+            }
+
+            if (b.pos.x < -200) {
+                (this as any).frenzyBots.splice(i, 1);
             }
         }
 
-        // Apply bot movement
-        if (targetX < this.bot.pos.x - 10) {
-            this.bot.dirX = -1;
-        } else if (targetX > this.bot.pos.x + 10) {
-            this.bot.dirX = 1;
-        } else {
-            this.bot.dirX = 0;
+        // Procedura nieprzerwanego napływu botów co 1s (aktywna przez pierwsze 6s działania gwiazdki)
+        if (this.invincibilityTimer > 3.0) {
+            this.botSpawnTimer -= dt;
+            if (this.botSpawnTimer <= 0) {
+                this.botSpawnCount++;
+                const loopIndex = this.botSpawnCount % 3;
+                const bType = loopIndex === 1 ? 'SLIDE' : loopIndex === 2 ? 'CLINCH' : 'GROUP';
+
+                const spawnBot = new Player(true);
+                spawnBot.facingX = -1;
+                (spawnBot as any).frenzyBotType = bType;
+
+                if (bType === 'CLINCH') {
+                    spawnBot.size.set(18 * 1.7, 36 * 1.7);
+                    spawnBot.stats.speed = 100;
+                } else if (bType === 'GROUP') {
+                    spawnBot.size.set(18, 36);
+                    spawnBot.stats.speed = 130;
+                } else {
+                    spawnBot.size.set(18, 36);
+                    spawnBot.stats.speed = 100;
+                }
+
+                spawnBot.pos.x = GAME_WIDTH + 100;
+                spawnBot.pos.y = GROUND_Y - spawnBot.size.y;
+                spawnBot.onGround = true;
+
+                (this as any).frenzyBots.push(spawnBot);
+                this.botSpawnTimer = 1.0;
+            }
+            return; // Blokujemy działanie domyślnego spawnera pojedynczego bota
         }
-        
-        // Bot tackle logic is handled by collision above
+
+        // Prevent bot spawning if a drop is very close
+        let isDropNear = false;
+        for (const drop of (this as any).drops || []) {
+            if (!drop.collected) {
+                const dropScreenX = drop.worldX - this.bgScrollX;
+                // If drop is approaching or on screen, don't spawn bots
+                if (dropScreenX > -200 && dropScreenX < 1400) {
+                    isDropNear = true;
+                    break;
+                }
+            }
+        }
+
+        if (this.botSpawnTimer > 0) {
+            if (!isDropNear) {
+                this.botSpawnTimer -= dt;
+            }
+            this.botAliveTimer = 0;
+            if (this.botSpawnTimer <= 0) {
+                this.botSpawnCount++;
+                
+                // POPRAWKA KOLEJNOŚCI: 1. Grupa Botów (GROUP), 2. Obrońca (SLIDE), 3. Taran (CLINCH)
+                const loopIndex = this.botSpawnCount % 3;
+                if (loopIndex === 1) {
+                    this.botType = 'GROUP';
+                } else if (loopIndex === 2) {
+                    this.botType = 'SLIDE';
+                } else {
+                    this.botType = 'CLINCH';
+                }
+                
+       // Przypisanie wielkości bazowych (Taran otrzymuje gabaryt 1.7x)
+                if (this.botType === 'CLINCH') {
+                    this.bot.size.set(18 * 1.7, 36 * 1.7);
+                    this.bot.stats.speed = 100;
+                } else if (this.botType === 'GROUP') {
+                    this.bot.size.set(18, 36);
+                    // POPRAWKA: Formacja 3 botów biegnie w kierunku gracza o 30% szybciej (wartość 130 zamiast bazy 100)
+                    this.bot.stats.speed = 130; 
+                } else {
+                    this.bot.size.set(18, 36);
+                    this.bot.stats.speed = 100;
+                }
+
+                this.bot.pos.x = GAME_WIDTH + 100;
+                this.bot.pos.y = GROUND_Y - this.bot.size.y;
+                this.bot.vel.x = 0;
+                this.bot.vel.y = 0;
+                this.bot.isTackling = false;
+                this.bot.hasTackled = false;
+                this.bot.hasHitPlayer = false;
+                this.bot.stunTimer = 0;
+                this.bot.knockbackTimer = 0;
+                this.bot.isWaitingForScrumRecovery = false;
+                this.bot.onGround = true;
+                this.botSpawnTimer = 0;
+                
+                this.isGroupQTEActive = false;
+                this.teammateActive = false;
+                this.teammateBotX = -1000;
+                this.groupTriggerTimer = 0;
+            }
+        } else {
+            this.botAliveTimer += dt;
+            this.bot.dirX = -1;
+            
+          // NOWOŚĆ: Skok wślizgu odpala się wyłącznie, jeśli biegnącym botem jest mały obrońca (SLIDE)
+            if (this.botType === 'SLIDE') {
+                const dist = this.bot.pos.x - this.player.pos.x;
+                if (dist > 0 && dist < 340 && !this.bot.isTackling && !this.bot.hasTackled) {
+                    this.bot.isTackling = true;
+                    this.bot.hasTackled = true;
+                    this.bot.tackleTimer = 2.0;
+                    this.bot.vel.x = -600; // Pr Prędkość wślizgu bota
+                    playSFX('hit');
+                }
+            }
+            
+            // If bot is far left, despawn and reset timer
+            if (this.bot.pos.x < -100) {
+                if (!this.bot.hasHitPlayer && this.botType === 'SLIDE') {
+                    this.addTime(5); // Dodajemy +5s za udany przeskok!
+                }
+                this.botSpawnTimer = 0.8;
+                this.bot.pos.x = -1000;
+                this.botAliveTimer = 0;
+            }
+        }
     }
 
     checkAABB(a: PhysicalBody, b: PhysicalBody) {
@@ -1271,155 +1843,131 @@ this.acquiredMessage = "Prepare for the clash";
         this.showRunArrow = false; // Strzałka znika, gdy wracamy do standardowej rozgrywki
     }
     
-startScrum() {
-    this.scrumVisualProgress = 0.1;
-this.scrumBarBounceY = 0;
-this.scrumBarBounceVelY = 0;
-this.scrumBarBounceAngle = 0;
-this.scrumBarBounceVelAngle = 0;
-this.scrumBarErrorTimer = 0;
-    this.isSpecialAttackWinning = false;
-    this.scrumSpecialSlowMoTimer = 0;
-    this.scrumComboCount = 0;
-this.scrumSpecialFlashTimer = 0;
-this.scrumSpecialTextTimer = 0;
+addTime(delta: number) {
+        this.timeLeft += delta;
+        if (this.timeLeft < 0) this.timeLeft = 0;
+        
+        this.timeModifierMessage = delta > 0 ? `+${delta}s` : `${delta}s`;
+        this.timeModifierTimer = 2.0;
+        this.timeModifierColor = delta > 0 ? '#4ade80' : '#f87171'; // green or red
+        this.timeModifierPlayerY = this.player.pos.y;
+        
+        // Spawn confetti from the timer (approx middle top)
+        for(let i=0; i<30; i++) {
+            const isWhite = i % 2 === 0;
+            this.particles.push({
+                pos: new Vector2(GAME_WIDTH / 2 + (Math.random() - 0.5) * 40, 60),
+                vel: new Vector2((Math.random() - 0.5) * 400, -200 - Math.random() * 400),
+                life: 1.0 + Math.random(),
+                type: isWhite ? 'confetti_white' : (delta > 0 ? 'confetti_green' : 'confetti_red'),
+                // @ts-ignore
+                isBigConfetti: true
+            });
+        }
+    }
+
+    startScrum() {
+        this.scrumVisualProgress = 0.1;
+        this.scrumBarBounceY = 0;
+        this.scrumBarBounceVelY = 0;
+        this.scrumBarBounceAngle = 0;
+        this.scrumBarBounceVelAngle = 0;
+        this.scrumBarErrorTimer = 0;
+        this.isSpecialAttackWinning = false;
+        this.scrumSpecialSlowMoTimer = 0;
+        this.scrumComboCount = 0;
+        this.scrumSpecialFlashTimer = 0;
+        this.scrumSpecialTextTimer = 0;
         this.subState = GameSubState.SCRUM_MATRIX;
         setBGM('scrum');
         playSFX('hit');
-        this.acquiredMessage = null; // Clear message
+        this.acquiredMessage = null;
         this.scrumTimer = 0;
         
-        // MOMENT 1: Potężne tąpnięcie silniczka wibracji w klatce, w której zawodnicy wpadają na siebie
         if (typeof navigator !== 'undefined' && navigator.vibrate) {
             navigator.vibrate(250); 
         }
-        this.scrumPromptTimer = 0.4; // Krótka pauza (0.4s) na ustabilizowanie kamery zoom-in przed pierwszym promptem
-        this.scrumPrompt = null;
+        this.scrumPromptTimer = 0.4;
+        this.scrumPrompt = 'PUSH';
         this.scrumCameraStartX = this.cameraX;
         this.scrumCameraStartY = this.cameraY;
         
-        // Let them stay right where they collided!
-        const leftPlayer = this.player.pos.x < this.bot.pos.x ? this.player : this.bot;
-        const rightPlayer = leftPlayer === this.player ? this.bot : this.player;
+        // POPRAWKA: Zawodnicy zaczynają idealnie na środku planszy i ekranu, z zerowym przesunięciem początkowym
+        this.scrumStartX = GAME_WIDTH / 2;
+        this.scrumOffset = 0;
+        this.scrumTargetOffset = 0;
         
-        const midX = (leftPlayer.pos.x + rightPlayer.pos.x + rightPlayer.size.x) / 2;
-        this.scrumStartX = midX;
-        
-        // ODWZOROWANIE STANU PLANSZY: Obliczamy przewagę pozycyjną na bazie odległości punktu zderzenia od środka pola.
-        // Jeśli zderzenie nastąpiło na Twojej połowie (midX < środek), wystartujesz z ujemnym offsetem (bliżej przegranej).
-        const fieldCenter = GAME_WIDTH / 2;
-        const positionAdvantage = (midX - fieldCenter) * 0.55; // Przelicznik odległości
-        
-      // Clampujemy przewagę do max -120 lub +120 (próg wygranej to 250), aby słabsza pozycja dawała znaczący debuff, ale NIGDY insta-win dla bota.
-        this.scrumOffset = Math.max(-120, Math.min(120, positionAdvantage));
-        this.scrumTargetOffset = this.scrumOffset; // POPRAWKA: Stabilizacja celu na starcie klinczu
-        
-        // Just neatly pack them at the collision point
-        leftPlayer.pos.x = midX - leftPlayer.size.x/2 - 15;
-        rightPlayer.pos.x = midX - rightPlayer.size.x/2 + 15;
+        this.player.pos.x = this.scrumStartX - this.player.size.x - 10;
+        this.bot.pos.x = this.scrumStartX + 10;
         
         this.player.vel.set(0, 0);
         this.bot.vel.set(0, 0);
         
-        // Czyścimy flagi akcji (używamy nieużywanych pól do kontrolowania jednorazowego kliknięcia na dany prompt)
         this.player.scrumCharging = false;
         this.bot.scrumCharging = false;
     }
     
 resolveScrumAction(actingPlayer: Player, action: 'PUSH' | 'HOLD', isBot: boolean = false): boolean | void {
-        // ANTIDOTUM NA INPUT BLEED: Jeśli nie ma wyświetlonego napiszu na ekranie, całkowicie ignorujemy wszelkie kliknięcia/strzałki
-        if (this.subState !== GameSubState.SCRUM_MATRIX || this.scrumPrompt === null) return;
+        if (this.subState !== GameSubState.SCRUM_MATRIX) return;
         
-        // Zapamiętujemy czy ruch był poprawny przed skasowaniem promptu
-        const isActionCorrect = this.scrumPrompt === action;
-        
-        // SFX: 'hit' for player action (correct or incorrect) or any bot action
         playSFX('hit');
-
-        // Zabezpieczenie przed spamowaniem i przytrzymywaniem: jeden zawodnik może wykonać tylko JEDNĄ akcję na jedno okienko promptu
-        if (actingPlayer.scrumCharging) return;
-        actingPlayer.scrumCharging = true; 
         
-        const pushAmount = 32; 
-        
-if (isActionCorrect) {
-            // Prawidłowy refleks!
-            actingPlayer.scrumPushTimer = 0.35; 
-            if (actingPlayer === this.player) {
-                this.scrumComboCount++;
-                let finalPush = pushAmount;
+        // Popychamy postacie o krok w przód po każdym uderzeniu w ekran PUSH
+        this.scrumTargetOffset += 24; 
+        this.player.scrumPushTimer = 0.25;
 
-                // NALICZENIE IMPULSU DRGAŃ DLA POPRAWNEGO KLIKNIĘCIA (Mały, sprężysty bounce i wahadło)
-                this.scrumBarBounceVelY = 24;       
-                this.scrumBarBounceVelAngle = 1;    
+        // Elastyczny skok paska postępu w dół
+        this.scrumBarBounceVelY = 32;       
+        this.scrumBarBounceVelAngle = 1.2;
 
-                if (this.scrumComboCount >= 5) {
-                    this.scrumComboCount = 0;
-                    finalPush = pushAmount * 3.6;        
-                    this.scrumSpecialFlashTimer = 1.0;   
-                    this.scrumSpecialTextTimer = 0.75;   
-                    this.scrumSpecialSlowMoTimer = 0.75; 
-                    
-                    // POTĘŻNY IMPULS ELASTYCZNEJ EKSPLOZJI (Kolosalna kompresja i zwrot wahadłowy paska przy 100%)
-                    this.scrumBarBounceVelY = 80;       
-                    this.scrumBarBounceVelAngle = 8;    
-                    
-                    this.bot.vel.x = 280; 
-                    
-                    if (Math.abs(this.scrumTargetOffset + finalPush) >= this.scrumWinOffset) {
-                        this.isSpecialAttackWinning = true;
-                    }
-                    
-                    playSFX('special_attack', 2);
-                    playSFX('cheer');
-                    this.screenShake = 0.8;
-                    
-                    // Optymalizacja cząsteczek: wybuch płomieni idealnie wokół geometrycznych granic nowego paska!
-                    this.spawnParticles(actingPlayer.pos.x + actingPlayer.size.x/2, actingPlayer.pos.y, 'touchdown', 20);
-                    this.spawnParticles(GAME_WIDTH / 2 - 140, GAME_HEIGHT - 48, 'touchdown', 15);
-                    this.spawnParticles(GAME_WIDTH / 2 + 140, GAME_HEIGHT - 48, 'touchdown', 15);
-                }
-
-                this.scrumTargetOffset += finalPush; 
-                this.spawnParticles(actingPlayer.pos.x + actingPlayer.size.x/2, actingPlayer.pos.y, 'perfect', 10);
-            } else {
-                this.scrumTargetOffset -= pushAmount;
-                this.spawnParticles(actingPlayer.pos.x + actingPlayer.size.x/2, actingPlayer.pos.y, 'miss', 10);
-            }
-        } else {
-            // Pudło / Zły przycisk!
-            if (actingPlayer === this.player) {
-                // IMPULS KARY (Aktywacja czerwieni i silne, szarpnięte, negatywne odbicie paska w górę i w lewo)
-                this.scrumBarErrorTimer = 0.65;      
-                this.scrumBarBounceVelY = -340;      
-                this.scrumBarBounceVelAngle = -35;   
-                
-                this.scrumComboCount = 0; 
-                this.scrumTargetOffset -= pushAmount; 
-                this.bot.scrumPushTimer = 0.35; 
-                this.spawnParticles(actingPlayer.pos.x + actingPlayer.size.x/2, actingPlayer.pos.y, 'miss', 10);
-                this.spawnParticles(GAME_WIDTH / 2, GAME_HEIGHT - 48, 'miss', 15); // Rozbłysk błędu na pasku
-                
-                if (typeof navigator !== 'undefined' && navigator.vibrate) {
-                    navigator.vibrate(140);
-                }
-            } else {
-                // Bot popełnił błąd – nagroda dla gracza: popychasz bota do przodu!
-                this.scrumTargetOffset += pushAmount;
-                this.player.scrumPushTimer = 0.35; 
-                this.spawnParticles(actingPlayer.pos.x + actingPlayer.size.x/2, actingPlayer.pos.y, 'hit', 10);
-            }
+        // FINAŁ FATALITY: Jeśli gracz dopcha bota do krawędzi wygranej, automatycznie odpala się widowiskowa sekwencja Special Attack!
+        if (this.scrumTargetOffset >= this.scrumWinOffset) {
+            this.scrumSpecialFlashTimer = 1.0;   
+            this.scrumSpecialTextTimer = 0.75;   
+            this.scrumSpecialSlowMoTimer = 0.75; 
+            
+            this.scrumBarBounceVelY = 85;       
+            this.scrumBarBounceVelAngle = 8;    
+            
+            this.isSpecialAttackWinning = true;
+            
+            playSFX('special_attack', 2);
+            playSFX('cheer');
+            this.screenShake = 0.8;
+            
+            this.spawnParticles(this.player.pos.x + this.player.size.x/2, this.player.pos.y, 'touchdown', 25);
+            this.resolveScrumWinner(true, true);
         }
-        
-        // NATYCHMIASTOWE ZNIKNIĘCIE I REFRESH: Czyścimy aktualny prompt natychmiast po wykonaniu akcji
-        this.scrumPrompt = null;
-        this.scrumPromptTimer = 0.16; // Bardzo krótka, dynamiczna przerwa (160ms) przed wylosowaniem nowego napisu
-        
-        return isActionCorrect;
+        return true;
     }
     
 resolveScrumWinner(playerWon: boolean, isFromSpecialAttack: boolean = false) {
         if (this.subState !== GameSubState.SCRUM_MATRIX) return;
+        
+        // POPRAWKA: Jeśli gracz przegra klincz z taranem, dzieje się to samo co po wślizgu: gracz upada, bot stoi obok, a po wstaniu Sama ucieka w lewo!
+        if (!playerWon) {
+            this.addTime(-5);
+            this.subState = GameSubState.REGULAR;
+            this.player.stunTimer = 3.0; // Leży 3 sekundy
+            this.player.knockbackTimer = 0.5;
+            this.player.vel.set(-100, -200); // Mały odrzut w tył
+            this.player.onGround = false;
+            
+            // Piłka wypada miękko blisko oszołomionego gracza
+            this.ball.vel.set((Math.random() - 0.5) * 20, -100);
+            this.ball.bounciness = 0.05;
+            this.ball.onGround = false;
+            
+            // Bot NIE znika z planszy – resetuje prędkość, aby dumnie stać przy leżącym graczu Sama na zatrzymanym tle
+            this.bot.vel.set(0, 0);
+            this.bot.hasHitPlayer = true;
+            this.bot.hasTackled = true; // Zabezpieczenie przed ponownym natychmiastowym klinczem
+            
+            playSFX('hit');
+            this.screenShake = 0.4;
+            return;
+        }
+
         this.subState = GameSubState.REGULAR;
         this.scrumSlowMoTimer = 0.4; // Ładujemy 0.4 sekundy czasu gry w zwolnionym tempie (co przełoży się na ok. 3.5 realnych sekund)
         
@@ -1427,91 +1975,31 @@ resolveScrumWinner(playerWon: boolean, isFromSpecialAttack: boolean = false) {
             playSFX('special_attack', 1.0);
         }
         
-        const attacker = this.player.role === PlayerRole.ATTACKER ? this.player : this.bot;
-        const defender = this.player.role === PlayerRole.DEFENDER ? this.player : this.bot;
-        
-        const attackerWon = (playerWon && this.player === attacker) || (!playerWon && this.bot === attacker);
-        
-if (attackerWon) {
-            // Attacker wins! Przegrany leży bezwzględnie dopóki touchdown nie zresetuje planszy
-            defender.knockbackTimer = 0.4;
-            defender.isWaitingForScrumRecovery = true; // Zamiast czasowego stunTimer, blokujemy go flagą recovery na stałe do momentu snap resetu
-            defender.stunTimer = 0;
-            defender.vel.y = -150; // Bigger bump
-            defender.onGround = false;
-            defender.vel.x = (defender.pos.x > attacker.pos.x) ? 300 : -300; // Stronger push
+// POPRAWKA: Po wygraniu klinczu bot (SweatySteve) upada daleko za plecami gracza i leży, plansza rusza, a gracz płynnie biegnie dalej jak po wślizgu!
+        if (playerWon) {
+            this.addTime(5); // Bezpośrednie wywołanie nagrody czasowej oraz hyper-wystrzału zielono-białego konfetti
+            this.bot.knockbackTimer = 0.4;
+            this.bot.isWaitingForScrumRecovery = true;
+            this.bot.vel.y = -100;
+            this.bot.onGround = false;
+            this.bot.vel.x = -350; // Odrzucenie daleko w lewo, by został przewinięty i zniknął w tyle planszy
             
-            attacker.vel.y = -50;
-            attacker.onGround = false;
-            attacker.vel.x = (attacker.pos.x < defender.pos.x) ? 100 : -100;
+            this.player.vel.set(0, 0);
+            this.player.stunTimer = 0;
+            this.player.isWaitingForScrumRecovery = false;
             
-            // ZABEZPIECZENIE PRZED INSTANT-TOUCHDOWNEM Z TELEPORTACJI
-            // Jeśli walka zakończyła się blisko strefy punktowej, odsuwamy zwycięzcę na bezpieczną odległość (150px),
-            // dając mu miejsce na wykonanie fizycznego biegu, a graczowi czas na zobaczenie komunikatu ostrzegawczego!
-            const runSafetyMargin = 150;
-            if (attacker === this.player) {
-                if (attacker.pos.x + attacker.size.x > GAME_WIDTH - runSafetyMargin) {
-                    attacker.pos.x = GAME_WIDTH - runSafetyMargin - attacker.size.x;
-                }
-            } else if (attacker === this.bot) {
-                if (attacker.pos.x < runSafetyMargin) {
-                    attacker.pos.x = runSafetyMargin;
-                }
-            }
+            this.botAvoidTimer = 3.0;
+            this.botSpawnTimer = 0.8; // Zaplanowanie spawnu kolejnego obrońcy za 3.5 sekundy
             
-this.screenShake = 0.5;
-            this.spawnParticles(defender.pos.x, defender.pos.y, 'hit', 20);
-            this.botAvoidTimer = 6.0; // Prevent immediate re-tackle after waking up
-
-// POPRAWKA: Komunikaty i intencje strzałek TD przekazujemy do bezpiecznych buforów oczekujących na pełne oddalenie obiektywu boiska
-            if (attacker === this.player) {
-                this.pendingAcquiredMessage = "GET THE TOUCHDOWN!";
-                this.pendingRunArrow = true; 
-                this.acquiredMessage = null; // Czyszczenie kadru planszy na czas trwania efektów i slow-motion
-            } else {
-                this.pendingAcquiredMessage = "OPPONENT GOT TOUCHDOWN";
-                this.showRunArrow = false;
-                this.pendingRunArrow = false; // POPRAWKA: Całkowicie wyłączamy bufor strzałki – to bot atakuje, gracz ma się bronić!
-                this.acquiredMessage = null; // Czyszczenie kadru planszy na czas trwania efektów i slow-motion
-            }
-                } else {
-                    // Defender wins!
-                    attacker.knockbackTimer = 0.4;
-                    attacker.isWaitingForScrumRecovery = true;
-                    attacker.vel.y = -150; // Bigger bump
-                    attacker.onGround = false;
-                    attacker.vel.x = (attacker.pos.x > defender.pos.x) ? 300 : -300; // Stronger push
-                    
-                    defender.vel.y = -50;
-                    defender.onGround = false;
-                    defender.vel.x = (defender.pos.x < attacker.pos.x) ? 100 : -100;
-                    
-                    this.screenShake = 0.8;
-                    this.spawnParticles(attacker.pos.x, attacker.pos.y, 'miss', 20);
-                    
-                    // Ball pops out logically
-                    attacker.role = PlayerRole.NEUTRAL;
-                    defender.role = PlayerRole.NEUTRAL;
-                    this.fumbleProtectTimer = 0.5;
-                    this.freeBallTimer = 0;
-                    this.subState = GameSubState.FREE_BALL;
-                    this.ball.allowCeilingBounce = true;
-                    this.ball.pos.y = GROUND_Y - this.ball.size.y - 40; // Start higher to ensure clear arc
-                    this.ball.onGround = false;
-                    this.ball.vel.y = -675; // Popped out in an arc UP very high
-                    this.ball.bounciness = 1.0; // Act like a rubber ball
-                    
-                    const dirToDefenderHalf = defender === this.player ? -1 : 1;
-                    this.ball.vel.x = dirToDefenderHalf * 335 + (Math.random() - 0.5) * 450; 
-                    
-                    // Wygrana obrońcy (Piłka wystrzeliwuje wysoko w powietrze)
-                    if (defender === this.player) {
-                        this.acquiredMessage = "CATCH THE BALL";
-                    } else {
-                        this.acquiredMessage = "OPPONENT CATCHING THE BALL";
-                    }
-                    this.showRunArrow = false; // Piłka jest wolna, brak strzałki naprowadzającej
-                }
+            this.acquiredMessage = null;
+            this.showRunArrow = false;
+            this.pendingRunArrow = false;
+            this.screenShake = 0.5;
+            this.spawnParticles(this.bot.pos.x, this.bot.pos.y, 'hit', 20);
+        } else {
+            this.botSpawnTimer = 0.8;
+            this.bot.pos.set(-1000, -1000);
+        }
     }
 
 
@@ -1546,6 +2034,7 @@ scoreTouchdown(player: Player) {
     setupExtraPoint(scoringPlayer: Player) {
         this.subState = GameSubState.KICKING;
         this.ball.onGround = true;
+        this.ball.flameColor = 'NONE';
         playSFX('whistle');
         this.player.role = scoringPlayer === this.player ? PlayerRole.ATTACKER : PlayerRole.DEFENDER;
         this.bot.role = scoringPlayer === this.bot ? PlayerRole.ATTACKER : PlayerRole.DEFENDER;
@@ -1627,7 +2116,15 @@ scoreFieldGoal(player: Player) {
         this.celebrationTimeoutId = setTimeout(() => this.resetToSnap(), 3000);
     }
     
-startKick() {
+    playerJump() {
+        if (this.subState === GameSubState.REGULAR && this.player.onGround && this.player.stunTimer <= 0 && this.isScrolling) {
+            this.player.vel.y = -750;
+            this.player.onGround = false;
+            playSFX('dash');
+        }
+    }
+    
+    startKick() {
         if (this.player.role !== PlayerRole.ATTACKER || this.player.stunTimer > 0) return;
         if (this.kickInputLockout > 0) return; // OCHRONA: Ignoruj kliknięcia przez pierwsze 500ms
 
@@ -1719,7 +2216,9 @@ releaseKick() {
             this.spawnParticles(startX, startY, 'miss', 10);
         }
     }
-    
+    worldRefBallSet(x: number, y: number) {
+        this.ball.pos.set(x, y);
+    }
     popBall() {
         if (this.player.role !== PlayerRole.ATTACKER) return;
         this.player.role = PlayerRole.NEUTRAL;
@@ -1734,5 +2233,6 @@ releaseKick() {
         this.ballOscillatePhase = Math.random() * Math.PI * 2;
         this.spawnParticles(this.ball.pos.x, this.ball.pos.y, 'pickup', 10);
     }
+    
 }
 
