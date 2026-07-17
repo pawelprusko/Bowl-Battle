@@ -969,7 +969,7 @@ if (this.countdownTimer <= 0) {
                         if (drop.type === 'TIME') {
                             this.addTime(10); // already adds +10 and confetti!
                         } else if (drop.type === 'STAR') {
-                            this.invincibilityTimer = 9.0;
+                            this.invincibilityTimer = 7.5;
                             this.botSpawnTimer = 0.0; // Natychmiastowo wyzwala napływ pierwszego bota z serii szału
                         }
                     }

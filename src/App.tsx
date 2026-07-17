@@ -715,7 +715,7 @@ const handleScrumPush = () => {
                     style={{ width: dimensions.width, height: dimensions.height }}
                 />
                 
-                {/* HUD Overlay */}
+{/* HUD Overlay */}
                 <div 
                     className="absolute top-0 left-0 w-full p-4 flex justify-center items-start pointer-events-none z-10 gap-2"
                     style={{
@@ -723,7 +723,7 @@ const handleScrumPush = () => {
                     }}
                 >
                     {/* Player Side */}
-                    <div className="flex flex-col items-end">
+                    <div className="flex flex-col items-end hidden">
                         <div className="bg-white/20 backdrop-blur-sm px-4 py-1 rounded-t-lg text-white text-xs font-bold uppercase tracking-wider w-32 text-center">
                             SaltySam
                         </div>
@@ -761,7 +761,7 @@ const handleScrumPush = () => {
                     </div>
                     
                     {/* Bot Side */}
-                    <div className="flex flex-col items-start">
+                    <div className="flex flex-col items-start hidden">
                         <div className="bg-white/20 backdrop-blur-sm px-4 py-1 rounded-t-lg text-white text-xs font-bold uppercase tracking-wider w-32 text-center">
                             SweatySteve
                         </div>
