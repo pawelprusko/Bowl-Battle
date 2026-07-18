@@ -1038,12 +1038,13 @@ if (this.countdownTimer <= 0) {
             }
 
 // Detekcja dotknięcia strzałki touchdownu na końcu planszy
-            if ((this as any).finalStretchActive && this.player.pos.x >= GAME_WIDTH - 110 && !this.matchFinished) {
-                playSFX('whistle');
-                this.matchFinished = true;
-                this.matchFreezeTimer = 2.5;
-                this.scrumStartX = this.player.pos.x;
-                this.acquiredMessage = null;
+                if ((this as any).finalStretchActive && this.player.pos.x >= GAME_WIDTH - 110 && !this.matchFinished) {
+                    playSFX('whistle');
+                    this.playerScore += 6; // KRYTYCZNA POPRAWKA: Rejestrujemy punkty touchdownu, aby ekran React poprawnie wyświetlił sukces!
+                    this.matchFinished = true;
+                    this.matchFreezeTimer = 2.5;
+                    this.scrumStartX = this.player.pos.x;
+                    this.acquiredMessage = null;
 
                 // Widowiskowy, dwufazowy wystrzał armatni konfetti na mecie
                 const particlesPerWave = 45;
